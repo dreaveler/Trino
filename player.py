@@ -1,5 +1,10 @@
 from card import UnoCard, MRCard
 from typing import List, Callable
+from enum import Enum
+
+class State(Enum):
+    playing = 0
+    over = 1
 
 class Player:
     def __init__(self, position, team):
@@ -8,4 +13,4 @@ class Player:
         
         self.uno_list: List[UnoCard] = []
         self.mr_card: MRCard = None
-        self.state: str = "playing"
+        self.state: State = State.playing
