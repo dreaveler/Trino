@@ -6,12 +6,12 @@ class PlayedCards:
     #创建储存正常打出的牌的deque，maxlen为2，为张昭张纮特殊准备
     def __init__(self):
         self.d=deque(maxlen=2)
-    def AddCard(self,card:UnoCard):
+    def add_card(self,card:UnoCard):
         #将打出的牌加入deque
         self.d.append(card)
-    def GetOne(self):
+    def get_one(self):
         #一般情况，返回最近一个card
         return self.d[-1]
-    def GetTwo(self):
+    def get_two(self):
         #二张专属，返回最近两个card，type=tuple
         return (self.d[0],self.d[-1])

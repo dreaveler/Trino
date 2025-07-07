@@ -1,37 +1,63 @@
 from card import UnoCard, MRCard
 from typing import List, Callable
 from enum import Enum
-from game import Game
-
-class State(Enum):
-    playing = 0
-    over = 1
 
 class Player:
-    def __init__(self, position, team):
+    #初始化玩家的时候似乎不应该给定position和team
+    def __init__(self, position, team:str):
+        from game import Game
         self.position = position
         self.team = team
         
         self.uno_list: List[UnoCard] = []
         self.mr_card: MRCard = None
-        self.state: State = State.playing
+        self.state: str = "playing"
         self.game : Game = None
     #拿num张牌,先用print来做游戏提示了
     def get_card(self,num:int):
         for _ in range(num):
-            if not self.game.unocard_pack:
+            if self.game.unocard_pack:
                 self.uno_list.append(self.game.unocard_pack.pop())
             else:
                 print("uno牌已被拿完")
-    #检查出牌是否合规 未完成  需要写
+                break
+    #检查出牌是否合规 最好检查一下有没有逻辑错误)
     def check_card(self,card):
-        pass
-    #出牌 如果出牌合规则回合结束 否则无视发生     需要一个flag来说明回合结束?
+        last_card = self.game.playedcards.get_one()
+        need_color = last_card.color
+        need_type = last_card.type
+        need_value = last_card.value
+        cur_color = card.color
+        cur_type = card.type
+        cur_value = card.value
+        if need_type == 'wild_draw4':
+            if cur_type == 'wild_draw4':
+                return True
+            else:
+                return False  #+4只能叠+4
+        if need_type == 'draw2':
+            if cur_type == 'draw2' or cur_type == 'wild_draw4':
+                return True
+            else:
+                return False  #+2可以叠+2或+4
+        if need_type == 'skip':
+            return False  #这里认为同种skip是抢出的逻辑
+        if cur_type == 'wild' or cur_type == 'wild_draw4':  #黑色牌可以任意
+            return True
+        if cur_color !=  need_color:   #颜色不一样时只有类型相同且数字相同才能出
+            if need_type == cur_type and need_value == cur_value:
+                return True
+            return False
+        return True   #这里之后都是同色的逻辑了  reverse的逻辑应该反应在game里  ban的逻辑同样且上面也写了  
+
+    #出牌 如果出牌合规则回合结束 否则无视发生 这里单指正常出一张   需要一个flag来说明回合结束?
     def play_a_hand(self,location):
         card = self.uno_list.pop(location)
         if self.check_card(card):
-            #这里用lmt写的数据结构 
-            pass
+            #设定颜色
+            if card.type == 'wild' or card.type == 'wild_draw4':
+                color = input("choose a color from red , green , blue , yellow")
+                self.game.cur_color = color
+            self.game.playedcards.add_card(card)
         else:
             print("出牌不符合规范！")
-            pass
