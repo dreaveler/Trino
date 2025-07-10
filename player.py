@@ -13,7 +13,7 @@ class Player:
         self.mr_card: MRCard = None
         self.state: str = "playing"
         self.game : Game = None
-    #拿num张牌,先用print来做游戏提示了
+    #拿num张牌,先用print来做游戏提示了 无return
     def get_card(self,num:int):
         for _ in range(num):
             if self.game.unocard_pack:
@@ -21,7 +21,7 @@ class Player:
             else:
                 print("uno牌已被拿完")
                 break
-    #检查出牌是否合规 最好检查一下有没有逻辑错误)
+    #检查出牌是否合规 return T/F  最好检查一下有没有逻辑错误)
     def check_card(self,card):
         last_card = self.game.playedcards.get_one()
         need_color = last_card.color
@@ -50,7 +50,7 @@ class Player:
             return False
         return True   #这里之后都是同色的逻辑了  reverse的逻辑应该反应在game里  ban的逻辑同样且上面也写了  
 
-    #出牌 如果出牌合规则回合结束 否则无视发生 这里单指正常出一张   需要一个flag来说明回合结束?
+    #出牌 无return 如果出牌合规则回合结束 否则无视发生 这里单指正常出一张   需要一个flag来说明回合结束? 
     def play_a_hand(self,location):
         card = self.uno_list.pop(location)
         if self.check_card(card):
@@ -61,3 +61,13 @@ class Player:
             self.game.playedcards.add_card(card)
         else:
             print("出牌不符合规范！")
+
+    #弃牌 无return 输入position:List 弃的牌不加入弃牌堆
+    def fold_card(self,pos:List[int]):
+        for index in sorted(pos,reverse=True):
+            self.uno_list.pop(index)
+    #跳牌 无return 在game中每次有人出牌后调用 如果不能跳牌则无事发生 如果可以则询问
+    def skip_card(self):
+        card = self.game.playedcards.get_one()
+        #need more
+

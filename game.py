@@ -5,15 +5,16 @@ from util import PlayedCards
 import random
 
 class Game:
-    def __init__(self,player_num:int):
+    def __init__(self,player_num:int,mode:str):
         self.player_num = player_num
         self.playedcards = PlayedCards()
+        self.mode = mode
 
         self.player_list: List[Player] = []
         self.unocard_pack:List[UnoCard] = []
-        self.create_unocard_pack()
 
         self.cur_location:int = None
+        self.dir: int = 1  #每次加一个dir  1/-1  默认为++
         self.cur_color:str = None
 
     #创造牌组
@@ -39,4 +40,14 @@ class Game:
     def deal_cards(self):
         for player in self.player_list:
             player.get_card(8)
-    
+        if self.cur_location:
+            self.player_list[self.cur_location].get_card(1)
+    #开始游戏
+    def game_start(self):
+        self.create_unocard_pack()
+        self.cur_location = random.randint(1,self.player_num)
+        self.deal_cards()
+    #单个玩家回合
+    def player_turn(self):
+        player = self.player_list[self.cur_location]
+        #need more
