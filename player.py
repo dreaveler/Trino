@@ -51,7 +51,7 @@ class Player:
         return True   #这里之后都是同色的逻辑了  reverse的逻辑应该反应在game里  ban的逻辑同样且上面也写了  
 
     #出牌 无return 如果出牌合规则回合结束 否则无视发生 这里单指正常出一张   需要一个flag来说明回合结束? 
-    def play_a_hand(self,location):
+    def play_a_hand(self,location:int):
         card = self.uno_list.pop(location)
         if self.check_card(card):
             #设定颜色
@@ -59,6 +59,7 @@ class Player:
                 color = input("choose a color from red , green , blue , yellow")
                 self.game.cur_color = color
             self.game.playedcards.add_card(card)
+            self.game.cur_color = card.color
         else:
             print("出牌不符合规范！")
 
@@ -66,8 +67,14 @@ class Player:
     def fold_card(self,pos:List[int]):
         for index in sorted(pos,reverse=True):
             self.uno_list.pop(index)
+    #检测无法出牌 返回T/F
+    def check_cannot_play_card(self):
+        for card in self.uno_list:
+            if self.check_card(card):
+                return False
+        return True
     #跳牌 无return 在game中每次有人出牌后调用 如果不能跳牌则无事发生 如果可以则询问
     def skip_card(self):
         card = self.game.playedcards.get_one()
         #need more
-
+    
