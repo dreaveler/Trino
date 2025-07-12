@@ -4,7 +4,7 @@ from card import UnoCard
 from util import PlayedCards
 import random
 
-#需要添加处理draw和skip的逻辑 指的是修改flag 在每次出牌后完成这次任务 
+#胜利条件
 class Game:
     def __init__(self,player_num:int,mode:str):
         self.player_num = player_num
@@ -18,8 +18,8 @@ class Game:
         self.dir: int = 1  #每次加一个dir  1/-1  默认为++
         self.cur_color:str = None
         #flag
-        self.draw_n:int = None
-        self.skip:bool = None
+        self.draw_n:int = 0
+        self.skip:bool = False
 
     #创造牌组
     def create_unocard_pack(self):
@@ -58,11 +58,11 @@ class Game:
         if self.draw_n:
             player = self.player_list[self.cur_location]
             player.get_card(self.draw_n)
-            self.draw_n = None
+            self.draw_n = 0
     #结算skip
     def skip_player(self):
         if self.skip:
-            self.skip = None
+            self.skip = False
     #结算所有状态
     def clear_state(self):
         self.draw_card()
@@ -80,4 +80,14 @@ class Game:
             print(f"card{i}: {card}")
         index = input("请选择你出牌的序号")
         player.play_a_hand(int(index))
+        self.change_flag()
         self.cur_location = self.cur_location + self.dir
+    #+2/+4/skip
+    def change_flag(self):
+        cardtype = self.playedcards.get_one().type
+        if cardtype == "draw2":
+            self.draw_n += 2
+        elif cardtype == "wild_draw4":
+            self.draw_n += 4
+        elif cardtype == "skip":
+            self.skip = True
