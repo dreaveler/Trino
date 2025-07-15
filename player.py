@@ -10,6 +10,7 @@ class Player:
         self.team = team
         
         self.uno_list: List[UnoCard] = []
+        self.card_num: int = None
         self.mr_card: MRCard = None
         self.state: str = "playing"
         self.game : Game = None
