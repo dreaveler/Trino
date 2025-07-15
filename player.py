@@ -10,6 +10,7 @@ class Player:
         self.team = team
         
         self.uno_list: List[UnoCard] = []
+        self.judging_list:str=[]#所需进行的判定
         self.card_num: int = None
         self.mr_card: MRCard = None
         self.state: str = "playing"
@@ -78,4 +79,8 @@ class Player:
     def skip_card(self):
         card = self.game.playedcards.get_one()
         #need more
-    
+    #依次执行判定
+    def judging(self):
+        for f in self.judging_list:
+            if f.need_judging:
+                f(self,self.game.unocard_pack.pop())
