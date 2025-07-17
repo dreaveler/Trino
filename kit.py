@@ -45,4 +45,4 @@ class NanManRuQin:
         for player in game.player_list:
             if player!=caller:
                 #和决斗一样没想好如何让大家轮流出牌并给出一个bool,这里应该有一个if
-                    player.get_card(4)
+                player.get_card(4)
