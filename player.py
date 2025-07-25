@@ -24,7 +24,18 @@ class Player:
                 print("uno牌已被拿完")
                 break
     #检查出牌是否合规 return T/F  最好检查一下有没有逻辑错误)
-    def check_card(self,card):
+    def check_card(self, card):
+        # 首轮弃牌堆为空，只判断当前颜色和黑色牌
+        if not hasattr(self.game.playedcards, 'd') or len(self.game.playedcards.d) == 0:
+            cur_color = card.color
+            cur_type = card.type
+            # 允许出当前颜色或黑色牌
+            if cur_type in ['wild', 'wild_draw4']:
+                return True
+            if cur_color == self.game.cur_color:
+                return True
+            return False
+        # ...原有逻辑...
         last_card = self.game.playedcards.get_one()
         need_color = last_card.color
         need_type = last_card.type
@@ -32,6 +43,15 @@ class Player:
         cur_color = card.color
         cur_type = card.type
         cur_value = card.value
+        # draw2/draw4叠加判定
+        if self.game.draw_n:
+            # 只允许出可叠加的牌
+            if need_type == 'draw2' and cur_type in ['draw2', 'wild_draw4']:
+                return True
+            if need_type == 'wild_draw4' and cur_type == 'wild_draw4':
+                return True
+            return False
+        # 普通判定
         if need_type == 'wild_draw4':
             if cur_type == 'wild_draw4':
                 return True
@@ -53,15 +73,18 @@ class Player:
         return True   #这里之后都是同色的逻辑了  reverse的逻辑应该反应在game里  ban的逻辑同样且上面也写了  
 
     #出牌 无return 如果出牌合规则回合结束 否则无视发生 这里单指正常出一张   需要一个flag来说明回合结束? 
-    def play_a_hand(self,location:int):
+    def play_a_hand(self,location:int, color_choice=None):
         card = self.uno_list.pop(location)
         if self.check_card(card):
-            #设定颜色
+            # 设定颜色
             if card.type == 'wild' or card.type == 'wild_draw4':
-                color = input("choose a color from red , green , blue , yellow")
-                self.game.cur_color = color
+                if color_choice:
+                    self.game.cur_color = color_choice
+                else:
+                    self.game.cur_color = card.color
+            else:
+                self.game.cur_color = card.color
             self.game.playedcards.add_card(card)
-            self.game.cur_color = card.color
         else:
             print("出牌不符合规范！")
 
