@@ -35,39 +35,30 @@ class Player:
             if cur_color == self.game.cur_color:
                 return True
             return False
-        # ...原有逻辑...
         last_card = self.game.playedcards.get_one()
         need_color = last_card.color
         need_type = last_card.type
-        need_value = last_card.value
         cur_color = card.color
         cur_type = card.type
-        cur_value = card.value
-        # draw2/draw4叠加判定
-        if self.game.draw_n:
-            # 只允许出可叠加的牌
-            if need_type == 'draw2' and cur_type in ['draw2', 'wild_draw4']:
+        game_color = self.game.cur_color
+        # skip/draw2时只考虑颜色与类型
+        if need_type in ['skip', 'draw2']:
+            if cur_type == need_type or cur_color == need_color:
                 return True
-            if need_type == 'wild_draw4' and cur_type == 'wild_draw4':
+            if cur_type in ['wild', 'wild_draw4']:
+                return True
+            return False
+        if need_type in ['wild', 'wild_draw4']:
+            if cur_color == game_color:
+                return True
+            if cur_type in ['wild', 'wild_draw4']:
                 return True
             return False
         # 普通判定
-        if need_type == 'wild_draw4':
-            if cur_type == 'wild_draw4':
-                return True
-            else:
-                return False  #+4只能叠+4
-        if need_type == 'draw2':
-            if cur_type == 'draw2' or cur_type == 'wild_draw4':
-                return True
-            else:
-                return False  #+2可以叠+2或+4
-        if need_type == 'skip':
-            return False  #这里认为同种skip是抢出的逻辑
         if cur_type == 'wild' or cur_type == 'wild_draw4':  #黑色牌可以任意
             return True
         if cur_color !=  need_color:   #颜色不一样时只有类型相同且数字相同才能出
-            if need_type == cur_type and need_value == cur_value:
+            if need_type == cur_type and last_card.value == card.value:
                 return True
             return False
         return True   #这里之后都是同色的逻辑了  reverse的逻辑应该反应在game里  ban的逻辑同样且上面也写了  
@@ -78,10 +69,11 @@ class Player:
         if self.check_card(card):
             # 设定颜色
             if card.type == 'wild' or card.type == 'wild_draw4':
+                # 修正 wild/wild_draw4 设定颜色后 cur_color 必须改变
                 if color_choice:
                     self.game.cur_color = color_choice
                 else:
-                    self.game.cur_color = card.color
+                    self.game.cur_color = card.color if card.color != 'wild' and card.color != 'wild_draw4' else self.game.cur_color
             else:
                 self.game.cur_color = card.color
             self.game.playedcards.add_card(card)

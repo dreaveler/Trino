@@ -81,9 +81,11 @@ class Game:
     def skip_player(self):
         if self.skip:
             self.skip = False
-    #结算所有状态（只处理skip，不处理draw2/draw4，draw2/draw4由玩家操作界面处理）
+    #结算所有状态（处理skip和draw2/draw4的移除）
     def clear_state(self):
         self.skip_player()
+        # 结算加牌后只清理skip，不清理draw_n
+        # draw_n只在玩家实际摸牌后清零
     #单个玩家回合
     def player_turn(self):
         # 跳牌逻辑，优先处理
@@ -97,10 +99,16 @@ class Game:
             return True
         # 检查无法出牌
         if player.check_cannot_play_card():
+            # 先处理加牌效果
+            if self.draw_n:
+                player.get_card(self.draw_n)
+                print(f"玩家{self.cur_location+1}因加牌效果，摸{self.draw_n}张牌")
+            else:
+                player.get_card(1)
+                print(f"玩家{self.cur_location+1}无法出牌，摸1张牌")
+            # 结算所有状态（清理弃牌堆和flag）
             if self.skip or self.draw_n:
                 self.clear_state()
-            player.get_card(1)
-            print(f"玩家{self.cur_location+1}无法出牌，摸1张牌")
             self.next_player()
             return False
         # 展示手牌
