@@ -286,25 +286,27 @@ class MainWindow(QWidget):
         self.show_game_round(first_round=True)
 
     def get_card_image_path(self, card):
-        # 根据 UnoCard 属性生成图片路径
+        import sys, os
         color = card.color
         type_ = card.type
         value = card.value
-        base = 'images/uno_images/'
+        base = os.path.join('images', 'uno_images')
+        if hasattr(sys, '_MEIPASS'):
+            base = os.path.join(sys._MEIPASS, 'images', 'uno_images')
         if type_ == 'number':
-            return f'{base}{color}_{value}.png'
+            return os.path.join(base, f'{color}_{value}.png')
         elif type_ == 'draw2':
-            return f'{base}{color}_+2.png'
+            return os.path.join(base, f'{color}_+2.png')
         elif type_ == 'reverse':
-            return f'{base}{color}_reverse.png'
+            return os.path.join(base, f'{color}_reverse.png')
         elif type_ == 'skip':
-            return f'{base}{color}_skip.png'
+            return os.path.join(base, f'{color}_skip.png')
         elif type_ == 'wild':
-            return f'{base}black_wildcard.png'
+            return os.path.join(base, 'black_wildcard.png')
         elif type_ == 'wild_draw4':
-            return f'{base}black_+4.png'
+            return os.path.join(base, 'black_+4.png')
         else:
-            return f'{base}back.png'
+            return os.path.join(base, 'back.png')
 
     def show_center_card(self, card=None):
         # 屏幕中央展示所有弃牌堆卡牌（历史区），全部以图片形式呈现

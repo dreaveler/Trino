@@ -1,10 +1,23 @@
 import requests
 import os
+import json
 
 class DeepSeekAI:
-    def __init__(self, api_key=None):
-        self.api_key = api_key or os.getenv('sk-d072d2e34a2b42e5ba3ab148b098ca5a')
-        self.api_url = 'https://api.deepseek.com/v1/chat/completions'
+    def __init__(self):
+        self.load_config()
+    
+    def load_config(self, config_path='config.json'):
+        """
+        从配置文件加载API密钥和基础URL。
+        config_path: 配置文件路径
+        """
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                self.api_key = config.get('ai_api_key', self.api_key)
+                self.api_url = config.get('ai_base_url', self.api_url)
+        else:
+            print(f"配置文件 {config_path} 不存在，使用默认设置。")
 
     def choose_card(self, uno_list, last_card, cur_color):
         """
@@ -37,12 +50,3 @@ class DeepSeekAI:
         else:
             print("AI请求失败：", response.text)
             return -1
-
-# 示例用法
-if __name__ == "__main__":
-    ai = DeepSeekAI(api_key="你的deepseekapi-key")
-    uno_list = ["red number 3", "blue draw2 0", "green number 5"]
-    last_card = "red number 3"
-    cur_color = "red"
-    idx = ai.choose_card(uno_list, last_card, cur_color)
-    print("AI选择的出牌序号：", idx)

@@ -1,0 +1,4 @@
+{
+    "ai_api_key": "Your API key here",
+    "ai_base_url": "https://api.deepseek.com/v1/chat/completions"
+}
