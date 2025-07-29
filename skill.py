@@ -16,6 +16,52 @@ class WuSheng(Skill):
             return card
             print('当前卡牌不符合技能发动条件')
 
+class JianXiong(Skill):
+    def __init__(self):
+        super().__init__('奸雄', '若场上打出的[+2]/[+4]牌对你生效且不由你打出，你可选择获得之', 'passive')
+    def on_effect(self, card:UnoCard, from_player:Player, to_player:Player):
+        """
+        当有+2或+4对拥有此技能的玩家生效时触发。
+        返回True表示技能成功发动，并处理了该牌效果；返回False则表示技能未发动。
+        """
+        if (card.type == 'draw2' or card.type == 'wild_draw4') and from_player != to_player:
+            # 游戏引擎应调用玩家的UI方法来让玩家决策
+            if to_player.choose_to_use_skill(self.name):
+                # 玩家获得这张牌
+                to_player.get_card_object(card)
+                print(f"【{to_player.name}】发动【奸雄】，获得了【{from_player.name}】打出的【{card.content}】")
+                # 返回True，表示该牌的效果（摸牌）已经被奸雄技能替代，游戏引擎不应再执行摸牌
+                return True
+        return False
+
+class HuJia(Skill):
+    def __init__(self):
+        super().__init__('护驾', '（主公技）当你需要打出[蓝色]时，可以令其他【魏】势力玩家替你打出，然后其摸1张牌', 'active')
+    def on_need_blue(self, lord:Player, weiguo_players:list):
+        """
+        当主公需要出蓝色牌时触发。
+        返回打出的牌对象表示成功，返回None表示无人响应。
+        """
+        # 过滤掉主公自己
+        helpers = [p for p in weiguo_players if p.team == 'wei' and p != lord]
+        if not helpers:
+            return None
+
+        # 游戏引擎应调用主公的UI方法来选择是否发动技能
+        if lord.choose_to_use_skill(self.name):
+            # 游戏引擎应依次询问魏势力玩家是否愿意打出蓝色牌
+            for helper in helpers:
+                # 游戏引擎调用helper的UI，让其选择要打的蓝色牌
+                card_to_play = helper.choose_blue_card_to_play_for_lord()
+                if card_to_play:
+                    # 该玩家打出此牌，并从手牌中移除
+                    helper.play_card_object(card_to_play)
+                    # 然后摸一张牌
+                    helper.get_card(1)
+                    print(f"【{lord.name}】发动【护驾】，【{helper.name}】替其打出【{card_to_play.content}】并摸一张牌")
+                    return card_to_play
+        return None
+
 class JiZhi(Skill):
     def __init__(self):
         super().__init__('集智','当你打出[+2]/[+4]/[换色]时，可以弃置1张牌','active')

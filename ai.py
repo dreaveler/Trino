@@ -1,23 +1,23 @@
 import requests
 import os
 import json
+import sys
 
 class DeepSeekAI:
     def __init__(self):
         self.load_config()
     
-    def load_config(self, config_path='config.json'):
+    def load_config(self):
         """
         从配置文件加载API密钥和基础URL。
         config_path: 配置文件路径
         """
-        if os.path.exists(config_path):
-            with open(config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                self.api_key = config.get('ai_api_key', self.api_key)
-                self.api_url = config.get('ai_base_url', self.api_url)
-        else:
-            print(f"配置文件 {config_path} 不存在，使用默认设置。")
+        base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        config_path = os.path.join(base_dir, 'config.json')
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        self.api_key = config.get('ai_api_key', self.api_key)
+        self.api_url = config.get('ai_base_url', self.api_url)
 
     def choose_card(self, uno_list, last_card, cur_color):
         """

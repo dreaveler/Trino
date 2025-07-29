@@ -12,10 +12,35 @@ class UnoCard:
         self.color = color
         self.value = value
 
+    @property
+    def content(self):
+        """返回卡牌内容的字符串描述，用于UI显示"""
+        if self.type == 'number':
+            return f"[{self.color}] {self.value}"
+        elif self.type == 'reverse':
+            return f"[{self.color}] 反转"
+        elif self.type == 'skip':
+            return f"[{self.color}] 跳过"
+        elif self.type == 'draw2':
+            return f"[{self.color}] +2"
+        elif self.type == 'wild':
+            return "[万能牌]"
+        elif self.type == 'wild_draw4':
+            return "[+4 万能牌]"
+        return f"[{self.color}] {self.type}"
+
     def __str__(self):
         return f"{self.color} {self.type} {self.value}"
 
 class MRCard:
-    def __init__(self, team: str, skill: Callable):
-        self.team = team
-        self.skill = skill
+    def __init__(self, name: str, gender: str, skills: list):
+        self.name = name          # 武将名
+        self.gender = gender      # 性别 'male'/'female'
+        self.skills = skills      # 技能列表（Skill对象）
+
+    def use_skill(self, skill_name, *args, **kwargs):
+        """发动指定技能"""
+        for skill in self.skills:
+            if skill.name == skill_name:
+                return skill(*args, **kwargs)
+        raise ValueError(f"未找到技能: {skill_name}")
