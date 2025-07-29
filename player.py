@@ -4,10 +4,11 @@ from enum import Enum
 
 class Player:
     #初始化玩家的时候似乎不应该给定position和team
-    def __init__(self, position, team:str):
+    def __init__(self, position, team:str, is_ai: bool = False):
         from game import Game
         self.position = position
         self.team = team
+        self.is_ai = is_ai
         
         self.uno_list: List[UnoCard] = []
         self.judging_list:str=[]#所需进行的判定
@@ -65,7 +66,14 @@ class Player:
 
     #拿num张牌,先用print来做游戏提示了 无return
     def get_card(self,num:int):
+        from PyQt5.QtWidgets import QMessageBox
         for _ in range(num):
+            if len(self.uno_list) >= 20:
+                if self.game and self.game.gui:
+                    QMessageBox.information(self.game.gui, '提示', f'玩家 {self.position + 1} ({self.mr_card.name}) 手牌已达20张上限，无法再摸牌。')
+                else:
+                    print(f"玩家 {self.position + 1} 手牌已达上限，不再摸牌。")
+                break
             if self.game.unocard_pack:
                 self.uno_list.append(self.game.unocard_pack.pop())
             else:

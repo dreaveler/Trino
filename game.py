@@ -3,6 +3,8 @@ from typing import List, Callable
 from card import UnoCard
 from util import PlayedCards
 import random
+from ai import AI
+from PyQt5.QtWidgets import QMessageBox
 
 #胜利条件
 class Game:
@@ -53,6 +55,7 @@ class Game:
         self.draw_n:int = 0
         self.skip:bool = False
         self.gui = None # 添加GUI引用
+        self.ai_handler = AI()
 
     #创造牌组
     def create_unocard_pack(self):
@@ -69,7 +72,7 @@ class Game:
             self.unocard_pack.append(UnoCard('wild_draw4','wild_draw4',10))
         random.shuffle(self.unocard_pack)
         
-    #将玩家加对对局中同时将game赋给玩家
+    #将玩家加对对局中同时将game赋給玩家
     def add_player(self,player:Player):
         self.player_list.append(player)
         player.game = self
@@ -94,6 +97,7 @@ class Game:
         self.deal_cards()
         card = self.unocard_pack.pop()
         print(f"游戏开始，揭示的第一张牌为：{card}")
+        self.playedcards.add_card(card)
         # 只用于设定颜色，不加入弃牌堆和玩家手牌
         if card.type in ['wild', 'wild_draw4']:
             if self.gui:
@@ -104,6 +108,116 @@ class Game:
                 self.cur_color = color
         else:
             self.cur_color = card.color
+    
+    def execute_skill_jianxiong(self, player):
+        """处理奸雄技能"""
+        card_to_gain = self.playedcards.d.pop() # 从弃牌堆顶拿走牌
+        player.get_card_object(card_to_gain)
+        self.draw_n = 0 # 罚牌数清零
+        print(f"玩家 {player.position+1} 发动【奸雄】，获得了 {card_to_gain}")
+        # 奸雄后是自己的回合，所以不需要next_player，只需要刷新UI
+        if self.gui:
+            self.gui.show_game_round()
+
+    def execute_skill_wusheng(self, player, card_idx):
+        """处理武圣技能"""
+        original_card = player.uno_list.pop(card_idx)
+        wusheng_card = UnoCard('draw2', 'red', 0)
+        self.playedcards.add_card(wusheng_card)
+        self.cur_color = 'red'
+        self.change_flag() # 触发+2效果
+        print(f"玩家 {player.position+1} 发动【武圣】，将 {original_card} 当作 {wusheng_card} 打出")
+
+    def execute_skill(self, skill, player, *args):
+        """统一的技能执行入口"""
+        print(f"玩家 {player.position+1} 尝试发动技能 {skill.name}")
+        # 这里可以根据技能名称调用不同的处理函数
+        if skill.name == '反间':
+            target, card_to_give = args
+            # 1. 玩家摸一张牌
+            player.get_card(1)
+            # 2. 将牌从玩家手牌给目标
+            player.play_card_object(card_to_give) # 从手牌移除
+            # 3. 目标弃掉所有同色牌
+            color_to_discard = card_to_give.color
+            cards_to_discard = [c for c in target.uno_list if c.color == color_to_discard]
+            cards_to_discard.append(card_to_give) # 把给的牌也算上
+            
+            fold_indices = [i for i, c in enumerate(target.uno_list) if c.color == color_to_discard]
+            target.fold_card(fold_indices)
+
+            QMessageBox.information(self.gui, "反间成功", f"玩家 {target.position+1} 弃掉了所有 {color_to_discard} 牌。")
+
+        # 在这里添加其他技能的逻辑...
+
+        # 检查胜利条件
+        if len(player.uno_list) == 0:
+            self.gui.show_winner_and_exit(player)
+            return
+        if len(target.uno_list) == 0:
+            self.gui.show_winner_and_exit(target)
+            return
+
+    def execute_ai_turn(self):
+        """执行AI玩家的回合"""
+        player = self.player_list[self.cur_location]
+        
+        # 检查是否必须响应加牌
+        if self.draw_n > 0 and not self.can_continue_draw_chain(player):
+            print(f"AI 玩家 {player.position+1} 无法续上加牌链，摸 {self.draw_n} 张牌")
+            player.get_card(self.draw_n)
+            self.draw_n = 0
+            self.next_player()
+            if self.gui:
+                self.gui.show_game_round()
+            return
+
+        # 构造游戏状态
+        game_state = {
+            'players': self.player_list,
+            'last_card': self.playedcards.get_one(),
+            'current_color': self.cur_color,
+            'draw_n': self.draw_n,
+            'game_direction': self.dir,
+        }
+
+        # AI决策
+        action_type, action_value = self.ai_handler.choose_action(player, game_state)
+        
+        print(f"AI ({player.mr_card.name}) 决定: {action_type} {action_value if action_value is not None else ''}")
+
+        try:
+            if action_type == 'draw':
+                player.get_card(1)
+            elif action_type == 'play':
+                card_to_play = player.uno_list[action_value]
+                
+                if player.check_card(card_to_play):
+                    if card_to_play.type in ['wild', 'wild_draw4']:
+                        # AI为万能牌选择颜色
+                        self.cur_color = self.ai_handler.choose_wild_color(player)
+                        print(f"AI 将颜色变为 {self.cur_color}")
+
+                    player.play_a_hand(action_value)
+                    self.change_flag()
+
+                    if len(player.uno_list) == 0:
+                        if self.gui:
+                            self.gui.show_winner_and_exit(player)
+                        return
+                else:
+                    # AI决策无效，则摸牌
+                    print(f"AI 决策无效，改为摸牌。")
+                    player.get_card(1)
+            # TODO: handle 'use_skill'
+        except Exception as e:
+            print(f"AI 执行出错: {e}，改为摸牌。")
+            player.get_card(1)
+
+        self.next_player()
+        if self.gui:
+            self.gui.show_game_round()
+
     #结算skip
     def skip_player(self):
         if self.skip:
@@ -144,26 +258,28 @@ class Game:
             if not self.can_continue_draw_chain(player):
                 # 检查是否有【奸雄】技能
                 if player.mr_card and any(skill.__class__.__name__ == 'JianXiong' for skill in player.mr_card.skills):
-                    jianxiong_skill = next(s for s in player.mr_card.skills if s.__class__.__name__ == 'JianXiong')
-                    last_card = self.playedcards.get_one()
-                    from_player = self.player_list[(self.cur_location - self.dir + self.player_num) % self.player_num]
-                    if jianxiong_skill.on_effect(last_card, from_player, player):
-                        self.draw_n = 0 # 奸雄成功，摸牌效果被抵消
+                    if self.gui.ask_yes_no_question("发动技能", "是否发动【奸雄】获得这张牌？"):
+                        self.execute_skill_jianxiong(player)
                         # 奸雄后，轮到自己出牌，继续执行回合
+                        # UI should be refreshed inside execute_skill_jianxiong or after it
+                        self.gui.show_game_round()
+                        return # Stop current turn logic, as a new one will start
                     else:
-                        # 玩家选择不发动奸雄，或条件不符，正常摸牌
-                        print(f"玩家 {player.position+1} 不能续上加牌链，发动【奸雄】失败，摸 {self.draw_n} 张牌")
+                        # 玩家选择不发动奸雄，正常摸牌
+                        print(f"玩家 {player.position+1} 选择不发动【奸雄】，摸 {self.draw_n} 张牌")
                         player.get_card(self.draw_n)
                         self.draw_n = 0
                         self.next_player()
-                        return False # 回合结束
+                        self.gui.show_game_round()
+                        return # 回合结束
                 else:
                     # 没有奸雄，正常摸牌
                     print(f"玩家 {player.position+1} 不能续上加牌链，摸 {self.draw_n} 张牌")
                     player.get_card(self.draw_n)
                     self.draw_n = 0
                     self.next_player()
-                    return False # 回合结束
+                    self.gui.show_game_round()
+                    return # 回合结束
             # 如果能续上，则正常进入他的回合，让他选择出牌
 
         # 跳牌逻辑，优先处理

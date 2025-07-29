@@ -2,13 +2,15 @@ from card import UnoCard
 from player import Player
 
 class Skill:
-    def __init__(self, name, description:str, type:str):
+    def __init__(self, name, description:str, type:str, is_active_in_turn: bool = False):
         self.name = name
         self.description = description
+        self.type = type # 'active' or 'passive'
+        self.is_active_in_turn = is_active_in_turn # Can be triggered by a button in player's turn
 
 class WuSheng(Skill):
     def __init__(self):
-        super().__init__('武圣', '你的[红色]可以当作[红+2]打出', 'active')
+        super().__init__('武圣', '你的[红色]可以当作[红+2]打出', 'active', is_active_in_turn=True)
     def __call__(self, card:UnoCard):
         if card.color=='red':
             return UnoCard('draw2','red',0)
@@ -81,7 +83,7 @@ class QiXi(Skill):
 
 class FanJian(Skill):
     def __init__(self):
-        super().__init__('反间','你摸1张牌后指定一名玩家，交给其1张非[黑色]手牌，目标玩家需弃置所有与此牌颜色相同的手牌（包括此牌）','active')
+        super().__init__('反间','你摸1张牌后指定一名玩家，交给其1张非[黑色]手牌，目标玩家需弃置所有与此牌颜色相同的手牌（包括此牌）','active', is_active_in_turn=True)
     def __call__(self, card:UnoCard,player:Player,other_player:Player):
         player.get_card(1)
         if card.color!='wild' and card.color!='wild_draw4':
