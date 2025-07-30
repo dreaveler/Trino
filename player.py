@@ -1,156 +1,291 @@
-from card import UnoCard, MRCard
-from typing import List, Callable
-from enum import Enum
+from __future__ import annotations
+from typing import List, TYPE_CHECKING
+if TYPE_CHECKING:
+    from game import Game
+    from mr_cards import MrCard
+from card import UnoCard
+from util import PlayAction
+from PyQt5.QtWidgets import QApplication
+
+HAND_LIMIT = 20
 
 class Player:
-    #初始化玩家的时候似乎不应该给定position和team
-    def __init__(self, position, team:str, is_ai: bool = False):
-        from game import Game
+    def __init__(self, position: int, is_ai: bool = False, team: str = None):
         self.position = position
-        self.team = team
-        self.is_ai = is_ai
-        
         self.uno_list: List[UnoCard] = []
-        self.judging_list:str=[]#所需进行的判定
-        self.card_num: int = None
-        self.mr_card: MRCard = None
-        self.state: str = "playing"
-        self.game : Game = None
-    def get_card_object(self, card: UnoCard):
-        """直接将一个卡牌对象加入手牌"""
-        self.uno_list.append(card)
+        self.is_ai = is_ai
+        self.game: Game = None
+        self.mr_card: MrCard = None
+        self.team = team
 
-    def play_card_object(self, card: UnoCard):
-        """从手牌中移除指定的卡牌对象"""
-        # 从后往前找，避免删除错误
-        for i in range(len(self.uno_list) - 1, -1, -1):
-            if self.uno_list[i] is card:
-                self.uno_list.pop(i)
-                return
-        print(f"警告: {self.name} 手中未找到要打出的牌 {card}")
+    @property
+    def hand_limit(self):
+        """获取玩家的手牌上限"""
+        if self.mr_card and any(s.name == '自守' for s in self.mr_card.skills):
+            return 8
+        return HAND_LIMIT
 
-    def choose_to_use_skill(self, skill_name: str) -> bool:
+    def choose_cards_to_discard(self, num_to_discard: int) -> List[UnoCard]:
+        """AI选择要弃置的牌的逻辑。简单策略：优先弃置高点数数字牌。"""
+        # 按点数降序排序，优先保留功能牌和低点数牌
+        sorted_hand = sorted(self.uno_list, key=lambda c: c.value if c.type == 'number' else -1, reverse=True)
+        return sorted_hand[:num_to_discard]
+
+    def draw_cards(self, num_to_draw: int, from_deck: bool = True, specific_cards: List[UnoCard] = None):
         """
-        询问玩家是否使用技能。
-        这应该触发GUI中的一个对话框。
+        玩家摸牌的核心逻辑。
+        :param num_to_draw: 要摸的牌数。
+        :param from_deck: 是否从主牌堆摸牌。
+        :param specific_cards: 是否是摸特定的牌（例如来自其他玩家的牌）。
         """
-        # 在GUI模式下，这会连接到MainWindow中的一个方法
-        if self.game and hasattr(self.game, 'gui') and self.game.gui:
-            return self.game.gui.ask_yes_no_question(f"轮到【{self.name}】", f"是否发动技能【{skill_name}】？")
-        # Fallback for non-GUI mode
-        answer = input(f"【{self.name}】, 是否发动技能【{skill_name}】？ (y/n): ")
-        return answer.lower() == 'y'
+        if not self.game:
+            return
 
-    def choose_blue_card_to_play_for_lord(self) -> UnoCard:
-        """
-        为护驾技能选择要打出的蓝色牌。
-        这应该触发GUI中的一个对话框。
-        """
-        blue_cards = [card for card in self.uno_list if card.color == 'blue']
-        if not blue_cards:
-            return None
-
-        if self.game and hasattr(self.game, 'gui') and self.game.gui:
-            # GUI会返回选中的卡牌对象或None
-            return self.game.gui.ask_for_card_choice(f"【{self.name}】的响应", "请为【护驾】选择一张蓝色牌打出，或取消。", blue_cards)
-        
-        # Fallback for non-GUI mode
-        print(f"【{self.name}】, 请为【护驾】选择一张蓝色牌打出:")
-        for i, card in enumerate(blue_cards):
-            print(f"  {i}: {card.content}")
-        print("  输入 'c' 取消.")
-        choice = input("你的选择: ")
-        if choice.isdigit() and 0 <= int(choice) < len(blue_cards):
-            return blue_cards[int(choice)]
-        return None
-
-    #拿num张牌,先用print来做游戏提示了 无return
-    def get_card(self,num:int):
-        from PyQt5.QtWidgets import QMessageBox
-        for _ in range(num):
-            if len(self.uno_list) >= 20:
-                if self.game and self.game.gui:
-                    QMessageBox.information(self.game.gui, '提示', f'玩家 {self.position + 1} ({self.mr_card.name}) 手牌已达20张上限，无法再摸牌。')
+        cards_drawn = []
+        if specific_cards:
+            cards_drawn = specific_cards
+        elif from_deck:
+            for _ in range(num_to_draw):
+                if self.game.unocard_pack:
+                    cards_drawn.append(self.game.unocard_pack.pop())
                 else:
-                    print(f"玩家 {self.position + 1} 手牌已达上限，不再摸牌。")
-                break
-            if self.game.unocard_pack:
-                self.uno_list.append(self.game.unocard_pack.pop())
-            else:
-                print("uno牌已被拿完")
-                break
-    #检查出牌是否合规 return T/F  最好检查一下有没有逻辑错误)
-    def check_card(self, card: UnoCard) -> bool:
-        """检查出牌是否合规，已整合+2/+4叠加规则"""
-        # 规则：如果当前有加牌惩罚(draw_n > 0)，则必须出+2或+4来续上
-        if self.game.draw_n > 0:
-            last_card = self.game.playedcards.get_one()
-            # 规则：+2上可叠+2或+4
-            if last_card.type == 'draw2' and card.type in ['draw2', 'wild_draw4']:
-                return True
-            # 规则：+4上只能叠+4
-            if last_card.type == 'wild_draw4' and card.type == 'wild_draw4':
-                return True
-            # 其他任何牌在加牌链中都是不合规的
-            return False
-
-        # 正常出牌规则 (draw_n == 0)
-        # 首轮弃牌堆为空
-        if not self.game.playedcards.d:
-            return card.type in ['wild', 'wild_draw4'] or card.color == self.game.cur_color
-
-        last_card = self.game.playedcards.get_one()
+                    # 牌堆没牌了
+                    break
         
-        # 万能牌总是可以出
-        if card.type in ['wild', 'wild_draw4']:
-            return True
+        if not cards_drawn:
+            return
 
-        # 颜色或数字/类型匹配
-        if card.color == self.game.cur_color or (card.type == last_card.type and card.type != 'number') or (card.value == last_card.value and card.type == 'number'):
-             # 如果弃牌堆顶是万能牌，则只匹配cur_color
-            if last_card.type in ['wild', 'wild_draw4']:
-                return card.color == self.game.cur_color
-            return True
-            
-        return False  
+        self.uno_list.extend(cards_drawn)
+        print(f"玩家 {self.position+1} 获得了 {len(cards_drawn)} 张牌。")
 
-    #出牌 无return 如果出牌合规则回合结束 否则无视发生 这里单指正常出一张   需要一个flag来说明回合结束? 
-    def play_a_hand(self,location:int, color_choice=None):
-        card = self.uno_list.pop(location)
-        # 关羽技能：红色牌可当红+2
-        if self.mr_card and any(skill.__class__.__name__ == 'WuSheng' for skill in self.mr_card.skills):
-            if card.color == 'red' and card.type == 'number':
-                from card import UnoCard
-                card = UnoCard('draw2', 'red', 0)
-        if self.check_card(card):
-            # 设定颜色
-            if card.type == 'wild' or card.type == 'wild_draw4':
-                if color_choice:
-                    self.game.cur_color = color_choice
-                else:
-                    self.game.cur_color = card.color if card.color != 'wild' and card.color != 'wild_draw4' else self.game.cur_color
+        # 摸牌后，立即检查手牌上限
+        self.game.check_hand_limit_and_discard_if_needed(self)
+
+    def handle_forced_draw(self):
+        """处理被动响应摸牌（例如被+2/+4）"""
+        # 检查是否有技能可以响应（如奸雄）
+        jianxiong_skill = next((s for s in self.mr_card.skills if s.__class__.__name__ == 'JianXiong'), None)
+        if jianxiong_skill and self.game.draw_chain_cards:
+            if self.game.gui and self.game.gui.ask_yes_no_question("发动奸雄", "是否发动【奸雄】获得所有伤害牌？"):
+                self.game.execute_skill_jianxiong(self)
+                return # 发动奸雄后，回合动作结束
+
+        # 正常强制摸牌
+        self.draw_cards(self.game.draw_n)
+        self.game.draw_n = 0
+        self.game.draw_chain_cards.clear()
+        self.game.next_player() # 被迫摸牌后，直接轮到下一位玩家
+
+    def play(self, card_idx: int, wusheng_active: bool = False):
+        """
+        玩家主动出牌。
+        """
+        is_valid, message, card_to_play, original_card = self.validate_play(card_idx, wusheng_active)
+        if not is_valid:
+            if self.game.gui:
+                self.game.gui.show_message_box("提示", message)
             else:
-                self.game.cur_color = card.color
-            self.game.playedcards.add_card(card)
+                print(message)
+            return
+
+        color_choice = None
+        if card_to_play.type in ['wild', 'wild_draw4']:
+            if self.game.gui:
+                color_choice = self.game.gui.choose_color_dialog()
+                if not color_choice:
+                    return # 玩家取消选择
+            else:
+                color_choice = 'red' # 非GUI模式默认为红色
+
+        action = PlayAction(
+            card=original_card,
+            source=self,
+            target=self.game.get_next_player(self.position),
+            color_choice=color_choice,
+            virtual_card=card_to_play if wusheng_active and original_card.color == 'red' else None
+        )
+        
+        self.game.turn_action_taken = True
+        self.game.process_play_action(action)
+
+    def validate_play(self, card_idx: int, wusheng_active: bool):
+        """
+        验证出牌操作的合法性。
+        返回: (is_valid, message, card_to_play, original_card)
+        """
+        if card_idx is None or card_idx >= len(self.uno_list):
+            return False, "无效的卡牌索引。", None, None
+
+        original_card = self.uno_list[card_idx]
+        card_to_play = original_card
+        if wusheng_active and original_card.color == 'red':
+            from card import UnoCard
+            card_to_play = UnoCard('draw2', 'red', 0)
+
+        if not self.check_card(card_to_play):
+            return False, "这张牌不符合出牌规则。", None, None
+
+        if len(self.uno_list) == 2 and self.game.gui:
+            # 可以在这里添加喊UNO的逻辑
+            pass
+
+        if len(self.uno_list) == 1 and card_to_play.type in ['wild', 'wild_draw4']:
+            self.draw_cards(1) # 惩罚摸牌
+            return False, "最后一张牌不能是黑色牌，已惩罚摸一张牌。", None, None
+
+        return True, "有效出牌", card_to_play, original_card
+
+    def activate_skill(self, skill_name: str):
+        """统一的技能发动入口"""
+        if skill_name == '反间':
+            self._activate_fanjian()
+        # ... 其他技能可以在此添加
         else:
-            print("出牌不符合规范！")
+            if self.game.gui:
+                self.game.gui.show_message_box("提示", f"技能 [{skill_name}] 的逻辑尚未完全移至Player。")
 
-    #弃牌 无return 输入position:List 弃的牌不加入弃牌堆
-    def fold_card(self,pos:List[int]):
-        for index in sorted(pos,reverse=True):
-            self.uno_list.pop(index)
-    #检测无法出牌 返回T/F
-    def check_cannot_play_card(self):
+    def _activate_fanjian(self):
+        """处理反间技能的新逻辑 - 优化弹窗体验"""
+        if not self.game.gui: return
+
+        # 1. 摸一张牌
+        self.draw_cards(1)
+        self.game.gui.show_temporary_message(f"{self.mr_card.name} 发动【反间】，摸了一张牌。")
+        # 摸牌后，不需要立即刷新手牌，等待后续统一刷新
+
+        # 2. 选择要“给”的牌，而不是“打出”
+        card_to_give = self.game.gui.choose_card_from_hand_dialog(self, "请选择一张你要交给对方的【反间】牌")
+        if not card_to_give: return
+        
+        # 技能核心：给牌，不应受出牌规则限制。但不能给黑色牌。
+        if card_to_give.type in ['wild', 'wild_draw4']:
+            self.game.gui.show_message_box("提示", "【反间】不能使用黑色牌。")
+            return
+
+        # 3. 选择目标
+        target = self.game.gui.choose_target_player_dialog(exclude_self=True)
+        if not target: return
+
+        # 4. 结算“给牌”动作
+        self.uno_list.remove(card_to_give)
+        # 这张牌没有进入弃牌堆，而是直接给了目标，所以不通过process_play_action
+        # 目标也不需要展示这张牌，因为马上就要弃掉了
+        
+        # 5. 结算反间效果：目标弃牌
+        color_to_discard = card_to_give.color
+        # 目标需要弃掉的牌包括新得到的这张
+        target.uno_list.append(card_to_give)
+        
+        cards_to_discard_indices = [i for i, c in enumerate(target.uno_list) if c.color == color_to_discard]
+        
+        if cards_to_discard_indices:
+            discarded_cards = target.fold_card(cards_to_discard_indices)
+            discard_info = ', '.join(str(c) for c in discarded_cards)
+            message = f"【反间】{target.mr_card.name} 弃置了所有 {color_to_discard} 牌"
+        else:
+            # 理论上不会发生，因为至少会弃掉给的牌
+            message = f"【反间】{target.mr_card.name} 没有 {color_to_discard} 牌可以弃置。"
+
+        self.game.gui.show_temporary_message(message, duration=3000) # 显示3秒
+        
+        # 6. 检查目标胜利条件
+        if len(target.uno_list) == 0:
+            self.game.game_over = True
+            self.game.gui.show_winner_and_exit(target)
+            return
+
+        self.game.turn_action_taken = True
+        # 7. 刷新整个游戏界面
+        self.game.gui.show_game_round()
+
+    def choose_fanjian_color_from_gui(self):
+        """供【反间】技能的目标玩家选择花色（通过GUI弹窗）"""
+        if not self.game.gui:
+            return 'red'  # 非GUI模式默认
+        return self.game.gui.choose_fanjian_color_dialog()
+
+    def check_for_jump(self, last_card: UnoCard) -> List:
+        """
+        检查该玩家是否有可以跳牌的选项。
+        返回一个包含可用跳牌信息的列表，每个元素是一个元组 (card_index, original_card, virtual_card)。
+        """
+        potential_jumps = []
+        if not last_card:
+            return potential_jumps
+
+        for i, card in enumerate(self.uno_list):
+            # 1. 标准跳牌: 颜色、类型、数值完全一致
+            if card.color == last_card.color and card.type == last_card.type and card.value == last_card.value:
+                potential_jumps.append({'original_card': card, 'virtual_card': None})
+
+            # 2. 武圣跳牌:  红色牌 跳 红色+2
+            if last_card.type == 'draw2' and last_card.color == 'red':
+                if self.mr_card and any(s.name == '武圣' for s in self.mr_card.skills):
+                    if card.color == 'red':
+                        from card import UnoCard # 确保 UnoCard 被导入
+                        virtual_card = UnoCard('draw2', 'red', 0)
+                        potential_jumps.append({'original_card': card, 'virtual_card': virtual_card})
+        
+        return potential_jumps
+        
+    #打牌
+    def play_a_hand(self,i:int):
+        return self.uno_list.pop(i)
+    
+    def play_card_object(self, card: UnoCard):
+        try:
+            self.uno_list.remove(card)
+        except ValueError:
+            print(f"错误：玩家 {self.position} 手牌中没有 {card}")
+
+    #弃牌
+    def fold_card(self,indices:list):
+        # 从大到小排序，防止删除时索引变化
+        indices.sort(reverse=True)
+        cards_folded = []
+        for i in indices:
+            if i < len(self.uno_list):
+                cards_folded.append(self.uno_list.pop(i))
+        return cards_folded
+
+    def fold_card_objects(self, cards_to_fold: List[UnoCard]):
+        """根据卡牌对象弃牌"""
+        for card in cards_to_fold:
+            try:
+                self.uno_list.remove(card)
+            except ValueError:
+                print(f"警告: 尝试弃掉不存在的牌 {card}")
+
+    def check_card(self,card:UnoCard):
+        last_card = self.game.playedcards.get_one()
+        cur_color = self.game.cur_color
+        # 检查倾国技能
+        if self.mr_card:
+            qingguo_skill = next((s for s in self.mr_card.skills if s.name == '倾国'), None)
+            if qingguo_skill and card.color == 'blue':
+                return True # 蓝色牌可以当任何颜色出
+
+            # 检查龙胆技能
+            longdan_skill = next((s for s in self.mr_card.skills if s.name == '龙胆'), None)
+            if longdan_skill:
+                if card.color == 'red' and cur_color == 'blue':
+                    return True
+                if card.color == 'blue' and cur_color == 'red':
+                    return True
+
+        if card.type == 'wild' or card.type == 'wild_draw4':
+            return True
+        if card.color == cur_color:
+            return True
+        if last_card and card.type == last_card.type and card.type != 'number':
+            return True
+        if last_card and card.type == 'number' and last_card.type == 'number' and card.value == last_card.value:
+            return True
+        return False
+
+    def can_play_any_card(self) -> bool:
+        """检查手牌中是否有任何可以合法打出的牌"""
         for card in self.uno_list:
             if self.check_card(card):
-                return False
-        return True
-    #跳牌 无return 在game中每次有人出牌后调用 如果不能跳牌则无事发生 如果可以则询问
-    def skip_card(self):
-        card = self.game.playedcards.get_one()
-        #need more
-    #依次执行判定
-    def judging(self):
-        for f in self.judging_list:
-            if f.need_judging:
-                f(self,self.game.unocard_pack.pop())
+                return True
+        return False

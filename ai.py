@@ -107,6 +107,22 @@ class AI:
         # 6. As a last resort, play the first valid card (should be covered by above, but for safety)
         return 'play', valid_cards[0][0]
 
+    def decide_jianxiong(self, player, cards_to_gain):
+        """AI decides whether to use JianXiong skill."""
+        # Simple rule: always use it if it's a +4.
+        # For +2, maybe consider hand size. For now, always take.
+        return True
+
+    def decide_qixi_target(self, player, all_players):
+        """AI decides who to target with QiXi skill."""
+        # Simple rule: target the player with the fewest cards.
+        opponents = [p for p in all_players if p != player]
+        if not opponents:
+            return None
+        
+        opponents.sort(key=lambda p: len(p.uno_list))
+        return opponents[0]
+
 class DeepSeekAI:
     def __init__(self):
         self.load_config()

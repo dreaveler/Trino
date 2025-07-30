@@ -11,16 +11,13 @@ class Skill:
 class WuSheng(Skill):
     def __init__(self):
         super().__init__('武圣', '你的[红色]可以当作[红+2]打出', 'active', is_active_in_turn=True)
-    def __call__(self, card:UnoCard):
-        if card.color=='red':
-            return UnoCard('draw2','red',0)
-        else:
-            return card
-            print('当前卡牌不符合技能发动条件')
+    # The actual logic is now handled in the GUI and Game engine
+    def __call__(self):
+        pass
 
 class JianXiong(Skill):
     def __init__(self):
-        super().__init__('奸雄', '若场上打出的[+2]/[+4]牌对你生效且不由你打出，你可选择获得之', 'passive')
+        super().__init__('奸雄', '【奸雄】若场上打出的[+2]/[+4]牌对你生效且不由你打出，你可以获得之。', 'passive')
     def on_effect(self, card:UnoCard, from_player:Player, to_player:Player):
         """
         当有+2或+4对拥有此技能的玩家生效时触发。
@@ -30,7 +27,7 @@ class JianXiong(Skill):
             # 游戏引擎应调用玩家的UI方法来让玩家决策
             if to_player.choose_to_use_skill(self.name):
                 # 玩家获得这张牌
-                to_player.get_card_object(card)
+                # 注意：实际的牌转移逻辑在 game.py 的 execute_skill_jianxiong 中处理
                 print(f"【{to_player.name}】发动【奸雄】，获得了【{from_player.name}】打出的【{card.content}】")
                 # 返回True，表示该牌的效果（摸牌）已经被奸雄技能替代，游戏引擎不应再执行摸牌
                 return True
@@ -76,19 +73,23 @@ class JiZhi(Skill):
             
 class QiXi(Skill):
     def __init__(self):
-        super().__init__('奇袭','当你打出[绿色]时，你可以指定一名玩家摸1张牌','active')
-    def __call__(self, card:UnoCard, other_player:Player):
+        super().__init__('奇袭','当你打出[绿色]时，你可以指定一名玩家摸1张牌','active', is_active_in_turn=False)
+    def __call__(self, card:UnoCard, player:Player, other_player:Player):
         if card.color=='green':
             other_player.get_card(1)
+            print(f"【{player.mr_card.name}】发动【奇袭】，【{other_player.mr_card.name}】摸了一张牌")
 
 class FanJian(Skill):
     def __init__(self):
-        super().__init__('反间','你摸1张牌后指定一名玩家，交给其1张非[黑色]手牌，目标玩家需弃置所有与此牌颜色相同的手牌（包括此牌）','active', is_active_in_turn=True)
-    def __call__(self, card:UnoCard,player:Player,other_player:Player):
-        player.get_card(1)
-        if card.color!='wild' and card.color!='wild_draw4':
-            fold_list=[]
-            for i in range(len(other_player.uno_list)):
-                if other_player.uno_list[i].color==card.color:
-                    fold_list.append(i)
-            other_player.fold_card(fold_list)
+        super().__init__('反间','出牌阶段，你可以摸一张牌，然后将一张手牌（非黑色）交给一名其他角色，该角色需弃置所有与此牌颜色相同的手牌。','active', is_active_in_turn=True)
+    # The actual logic is now handled in the player.py and Game engine
+    def __call__(self):
+        pass
+
+class ZiShou(Skill):
+    def __init__(self):
+        super().__init__('自守', '（锁定技）你的手牌数上限调整为8。', 'passive')
+
+class ZongShi(Skill):
+    def __init__(self):
+        super().__init__('宗室', '（主公技）其他【群】势力玩家被加牌时，其可以令你弃置1张牌。', 'passive')
