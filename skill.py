@@ -10,28 +10,23 @@ class Skill:
 
 class WuSheng(Skill):
     def __init__(self):
-        super().__init__('武圣', '你的[红色]可以当作[红+2]打出', 'active', is_active_in_turn=True)
-    # The actual logic is now handled in the GUI and Game engine
-    def __call__(self):
-        pass
+        super().__init__('武圣', '你的[红色]可以当作[红+2]打出。', 'active', is_active_in_turn=True)
+    def use(self, original_card:UnoCard):
+        # original_card是被当作+2打出的红色牌
+        return f"{self.name} 发动[武圣]，将 [{original_card}] 当作 [红+2] 打出"
 
 class JianXiong(Skill):
     def __init__(self):
         super().__init__('奸雄', '【奸雄】若场上打出的[+2]/[+4]牌对你生效且不由你打出，你可以获得之。', 'passive')
     def on_effect(self, card:UnoCard, from_player:Player, to_player:Player):
         """
-        当有+2或+4对拥有此技能的玩家生效时触发。
-        返回True表示技能成功发动，并处理了该牌效果；返回False则表示技能未发动。
+        返回详细历史文本
         """
         if (card.type == 'draw2' or card.type == 'wild_draw4') and from_player != to_player:
-            # 游戏引擎应调用玩家的UI方法来让玩家决策
             if to_player.choose_to_use_skill(self.name):
-                # 玩家获得这张牌
-                # 注意：实际的牌转移逻辑在 game.py 的 execute_skill_jianxiong 中处理
-                print(f"【{to_player.name}】发动【奸雄】，获得了【{from_player.name}】打出的【{card.content}】")
-                # 返回True，表示该牌的效果（摸牌）已经被奸雄技能替代，游戏引擎不应再执行摸牌
-                return True
-        return False
+                # 实际获得牌逻辑在game.py
+                return f"{to_player.mr_card.name} 发动[奸雄]，获得了 {from_player.mr_card.name} 打出的 [{card}]"
+        return None
 
 class HuJia(Skill):
     def __init__(self):
@@ -70,21 +65,23 @@ class JiZhi(Skill):
         else:
             return card
             print('当前卡牌不符合技能发动条件')
-            
+
 class QiXi(Skill):
     def __init__(self):
         super().__init__('奇袭','当你打出[绿色]时，你可以指定一名玩家摸1张牌','active', is_active_in_turn=False)
     def __call__(self, card:UnoCard, player:Player, other_player:Player):
         if card.color=='green':
-            other_player.get_card(1)
-            print(f"【{player.mr_card.name}】发动【奇袭】，【{other_player.mr_card.name}】摸了一张牌")
+            # 使用is_skill_draw=True来避免重复的历史记录
+            other_player.draw_cards(1, is_skill_draw=True)
+            return f"{player.mr_card.name} 发动[奇袭]，令 {other_player.mr_card.name} 摸了一张牌"
+        return None
 
 class FanJian(Skill):
     def __init__(self):
-        super().__init__('反间','出牌阶段，你可以摸一张牌，然后将一张手牌（非黑色）交给一名其他角色，该角色需弃置所有与此牌颜色相同的手牌。','active', is_active_in_turn=True)
-    # The actual logic is now handled in the player.py and Game engine
-    def __call__(self):
-        pass
+        super().__init__('反间','反间：出牌阶段，你可以摸一张牌，然后将一张手牌（非黑色）交给一名其他角色，该角色需弃置所有与此牌颜色相同的手牌。','active', is_active_in_turn=True)
+    def record_history(self, player, target, card_given, cards_discarded):
+        discard_str = '、'.join(str(c) for c in cards_discarded) if cards_discarded else '无'
+        return f"{player.mr_card.name} 发动[反间]，{target.mr_card.name} 弃掉了 [{discard_str}]"
 
 class ZiShou(Skill):
     def __init__(self):
