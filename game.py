@@ -3,7 +3,7 @@ from typing import List, Callable
 from card import UnoCard
 from util import PlayedCards, PlayAction
 import random
-from ai import AI
+from ai import AI, AIPlayer
 from PyQt5.QtWidgets import QMessageBox
 
 #胜利条件
@@ -327,7 +327,7 @@ class Game:
         if skill.name == '反间':
             target, card_to_give = args
             # 1. 玩家摸一张牌
-            player.ai_draw_cards(1)
+            AIPlayer.ai_draw_cards(player, 1, is_skill_draw=True)
             # 2. 将牌从玩家手牌给目标
             player.play_card_object(card_to_give) # 从手牌移除
             # 3. 目标弃掉所有同色牌
@@ -361,7 +361,7 @@ class Game:
         if skill.name == '反间':
             target, card_to_give = args
             # 1. 玩家摸一张牌
-            player.player_draw_cards(1)
+            player.player_draw_cards(1, is_skill_draw=True)
             # 2. 将牌从玩家手牌给目标
             player.play_card_object(card_to_give) # 从手牌移除
             # 3. 目标弃掉所有同色牌
@@ -415,7 +415,7 @@ class Game:
         # 回合开始时检查手牌上限
         if len(player.uno_list) > player.hand_limit:
             num_to_discard = len(player.uno_list) - player.hand_limit
-            cards_to_discard = player.ai_choose_cards_to_discard(num_to_discard)
+            cards_to_discard = AIPlayer.ai_choose_cards_to_discard(player, num_to_discard)
             player.fold_card_objects(cards_to_discard)
             discard_info = ', '.join(str(c) for c in cards_to_discard)
             message = f"AI 玩家 {player.position+1} ({player.mr_card.name}) 回合开始时手牌超限，弃置了: {discard_info}"
@@ -424,24 +424,26 @@ class Game:
             else:
                 print(message)
 
-        if self.draw_n > 0 and not self.can_continue_draw_chain(player):
+        if self.draw_n > 0: # If there's any pending draw penalty
+            # Perform the forced draw
+            print(f"AI 玩家 {player.position+1} 摸 {self.draw_n} 张牌 (强制摸牌)")
+            player.handle_forced_draw() # This performs the actual draw based on draw_n and hand_limit
+            
+            # 强制摸牌完成后，检查是否有技能可以响应（如奸雄）
             jianxiong_skill = next((s for s in player.mr_card.skills if s.__class__.__name__ == 'JianXiong'), None)
-
-            # AI 奸雄决策
-            if jianxiong_skill and self.draw_chain_cards:
+            jianxiong_eligible_cards = [
+                original_card for effective_card, original_card, source_player in self.draw_chain_cards
+                if (effective_card.type == 'draw2' or effective_card.type == 'wild_draw4') and source_player != player
+            ]
+            if jianxiong_skill and jianxiong_eligible_cards:
                 if self.ai_handler.decide_jianxiong(player, self.draw_chain_cards):
                     print(f"AI 玩家 {player.position+1} 发动【奸雄】")
                     self.execute_skill_jianxiong(player)
-                    self.next_player()  # 奸雄后结束回合
-                    if self.gui:
-                        self.gui.show_game_round()
-                    return True # 技能发动，回合结束
-
-            print(f"AI 玩家 {player.position+1} 无法续上加牌链，摸 {self.draw_n} 张牌")
-            player.ai_draw_cards(self.draw_n)
+            
+            # Clear draw state after handling forced draw and potential JianXiong
             self.draw_n = 0
-            self.next_player()
             self.draw_chain_cards.clear()
+            self.next_player() # End turn after forced draw
             if self.gui:
                 self.gui.show_game_round()
             return True
@@ -492,7 +494,27 @@ class Game:
 
         # 如果没有成功出牌（包括AI决策为摸牌、出牌无效、或发生错误）
         if not played_successfully:
-            player.ai_draw_cards(1)
+            if self.draw_n > 0: # If there's any pending draw penalty
+                # AI chooses to take the penalty.
+                player.handle_forced_draw() # This performs the actual draw based on draw_n and hand_limit
+                
+                # After drawing, check for JianXiong
+                jianxiong_skill = next((s for s in player.mr_card.skills if s.__class__.__name__ == 'JianXiong'), None)
+                jianxiong_eligible_cards = [
+                    original_card for effective_card, original_card, source_player in self.draw_chain_cards
+                    if (effective_card.type == 'draw2' or effective_card.type == 'wild_draw4') and source_player != player
+                ]
+
+                if jianxiong_skill and jianxiong_eligible_cards:
+                    if self.ai_handler.decide_jianxiong(player, self.draw_chain_cards):
+                        self.execute_skill_jianxiong(player) # This method will gain the cards from draw_chain_cards
+
+                # Clear draw state after handling forced draw and potential JianXiong
+                self.draw_n = 0
+                self.draw_chain_cards.clear()
+            else: # Voluntary draw (draw_n == 0)
+                AIPlayer.ai_draw_cards(player, 1)
+            
             self.next_player()
             if self.gui:
                 self.gui.show_game_round()
@@ -500,7 +522,7 @@ class Game:
     def _execute_ai_play(self, player, card_idx):
         """AI出牌执行"""
         try:
-            player.ai_play(card_idx)
+            AIPlayer.ai_play(player, card_idx)
             return True
         except Exception as e:
             print(f"AI出牌失败: {e}")
@@ -518,21 +540,25 @@ class Game:
 
     def _player_pre_turn_checks(self, player):
         """玩家回合开始前的检查，如是否必须摸牌。返回True表示回合已处理完毕。"""
-        if self.draw_n > 0 and not self.can_continue_draw_chain(player):
+        if self.draw_n > 0: # If there's any pending draw penalty
+            # Perform the forced draw
+            print(f"玩家 {player.position+1} 摸 {self.draw_n} 张牌 (强制摸牌)")
+            player.handle_forced_draw() # This performs the actual draw based on draw_n and hand_limit
+            
+            # 强制摸牌完成后，检查是否有技能可以响应（如奸雄）
             jianxiong_skill = next((s for s in player.mr_card.skills if s.__class__.__name__ == 'JianXiong'), None)
-
-            # 玩家奸雄决策
-            if jianxiong_skill and self.draw_chain_cards:
+            jianxiong_eligible_cards = [
+                original_card for effective_card, original_card, source_player in self.draw_chain_cards
+                if (effective_card.type == 'draw2' or effective_card.type == 'wild_draw4') and source_player != player
+            ]
+            if jianxiong_skill and jianxiong_eligible_cards:
                 if self.gui and self.gui.ask_yes_no_question("发动奸雄", "是否发动【奸雄】获得所有[+2]/[+4]牌？"):
                     self.execute_skill_jianxiong(player)
-                    self.next_player()  # 奸雄后结束回合
-                    if self.gui:
-                        self.gui.show_game_round()
-                    return True # 技能发动，回合结束
-
-            # 玩家被迫摸牌
-            player.player_handle_forced_draw()
-            self.next_player()
+            
+            # Clear draw state after handling forced draw and potential JianXiong
+            self.draw_n = 0
+            self.draw_chain_cards.clear()
+            self.next_player() # End turn after forced draw
             if self.gui:
                 self.gui.show_game_round()
             return True
@@ -544,18 +570,31 @@ class Game:
 
     def handle_player_draw(self, player):
         """处理玩家摸牌"""
-        draw_n = self.draw_n
-        can_draw_chain = self.can_continue_draw_chain(player)
-        
-        # 情况一：被迫响应加牌链
-        if draw_n > 0 and not can_draw_chain:
-            player.player_handle_forced_draw()
-        # 情况二：主动摸牌
-        else:
+        if self.draw_n > 0: # If there's any pending draw penalty
+            # Player chooses to take the penalty.
+            player.handle_forced_draw() # This performs the actual draw based on draw_n and hand_limit
+            
+            # After drawing, check for JianXiong
+            jianxiong_skill = next((s for s in player.mr_card.skills if s.__class__.__name__ == 'JianXiong'), None)
+            jianxiong_eligible_cards = [
+                original_card for effective_card, original_card, source_player in self.draw_chain_cards
+                if (effective_card.type == 'draw2' or effective_card.type == 'wild_draw4') and source_player != player
+            ]
+
+            if jianxiong_skill and jianxiong_eligible_cards:
+                if self.gui and self.gui.ask_yes_no_question("发动奸雄", "是否发动【奸雄】获得所有[+2]/[+4]牌？"):
+                    self.execute_skill_jianxiong(player) # This method will gain the cards from draw_chain_cards
+
+            # Clear draw state after handling forced draw and potential JianXiong
+            self.draw_n = 0
+            self.draw_chain_cards.clear()
+        else: # Voluntary draw (draw_n == 0)
             player.player_draw_cards(1)
-            self.turn_action_taken = True
-            if self.gui:
-                self.gui.show_game_round()
+        
+        self.turn_action_taken = True # Drawing counts as an action
+        if self.gui:
+            self.gui.show_game_round()
+        self.next_player() # End turn after drawing (voluntary or forced)
 
     def handle_player_skill(self, player, skill_name):
         """处理玩家技能"""
@@ -629,6 +668,8 @@ class Game:
         # 检查是否需要跳过这个刚刚轮到的玩家
         if self.skip:
             skipped_player = self.player_list[self.cur_location] # 这是要被跳过的玩家
+            # 记录跳过历史
+            self.add_history(f"{skipped_player.mr_card.name} 被跳过！")
             if self.gui:
                 # 在GUI中显示跳过信息
                 self.gui.show_temporary_message(f"玩家 {skipped_player.position + 1} ({skipped_player.mr_card.name}) 被跳过！")
@@ -680,30 +721,63 @@ class Game:
     def handle_play(self, player, card_idx, wusheng_active):
         """统一的出牌处理入口"""
         if player.is_ai:
-            player.ai_play(card_idx, wusheng_active)
+            AIPlayer.ai_play(player, card_idx, wusheng_active)
         else:
             player.player_play(card_idx, wusheng_active)
 
     def handle_draw(self, player):
         """统一的摸牌处理入口"""
         if player.is_ai:
-            player.ai_draw_cards(1)
+            if self.draw_n > 0: # If there's any pending draw penalty
+                # AI chooses to take the penalty.
+                player.handle_forced_draw() # This performs the actual draw based on draw_n and hand_limit
+                
+                # After drawing, check for JianXiong
+                jianxiong_skill = next((s for s in player.mr_card.skills if s.__class__.__name__ == 'JianXiong'), None)
+                jianxiong_eligible_cards = [
+                    original_card for effective_card, original_card, source_player in self.draw_chain_cards
+                    if (effective_card.type == 'draw2' or effective_card.type == 'wild_draw4') and source_player != player
+                ]
+
+                if jianxiong_skill and jianxiong_eligible_cards:
+                    if self.ai_handler.decide_jianxiong(player, self.draw_chain_cards):
+                        self.execute_skill_jianxiong(player) # This method will gain the cards from draw_chain_cards
+
+                # Clear draw state after handling forced draw and potential JianXiong
+                self.draw_n = 0
+                self.draw_chain_cards.clear()
+            else: # Voluntary draw (draw_n == 0)
+                AIPlayer.ai_draw_cards(player, 1)
+            
             self.next_player()
             if self.gui:
                 self.gui.show_game_round()
         else:
-            draw_n = self.draw_n
-            can_draw_chain = self.can_continue_draw_chain(player)
-            
-            # 情况一：被迫响应加牌链
-            if draw_n > 0 and not can_draw_chain:
-                player.player_handle_forced_draw()
-            # 情况二：主动摸牌
-            else:
+            if self.draw_n > 0: # If there's any pending draw penalty
+                # Player chooses to take the penalty.
+                player.handle_forced_draw() # This performs the actual draw based on draw_n and hand_limit
+                
+                # After drawing, check for JianXiong
+                jianxiong_skill = next((s for s in player.mr_card.skills if s.__class__.__name__ == 'JianXiong'), None)
+                jianxiong_eligible_cards = [
+                    original_card for effective_card, original_card, source_player in self.draw_chain_cards
+                    if (effective_card.type == 'draw2' or effective_card.type == 'wild_draw4') and source_player != player
+                ]
+
+                if jianxiong_skill and jianxiong_eligible_cards:
+                    if self.gui and self.gui.ask_yes_no_question("发动奸雄", "是否发动【奸雄】获得所有[+2]/[+4]牌？"):
+                        self.execute_skill_jianxiong(player) # This method will gain the cards from draw_chain_cards
+
+                # Clear draw state after handling forced draw and potential JianXiong
+                self.draw_n = 0
+                self.draw_chain_cards.clear()
+            else: # Voluntary draw (draw_n == 0)
                 player.player_draw_cards(1)
-                self.turn_action_taken = True
-                if self.gui:
-                    self.gui.show_game_round()
+            
+            self.turn_action_taken = True # Drawing counts as an action
+            if self.gui:
+                self.gui.show_game_round()
+            self.next_player() # End turn after drawing (voluntary or forced)
 
     def handle_skill(self, player, skill_name):
         """统一的技能处理入口"""
@@ -783,8 +857,16 @@ class Game:
     def _handle_post_play_turn_logic(self, player, is_jump):
         """处理出牌后的回合逻辑"""
         if is_jump:
-            # 添加跳牌历史记录
-            self.add_history(f"{player.mr_card.name} 跳 [{player.game.playedcards.get_one()}]")
+            # 添加跳牌历史记录 - 使用最后一张牌的原始牌信息
+            last_play_info = self.playedcards.get_last_play_info()
+            if last_play_info:
+                _, original_card, _ = last_play_info
+                self.add_history(f"{player.mr_card.name} 跳 [{original_card}]")
+            
+            # 检查是否打出了skip牌，如果是则消耗skip状态
+            if last_play_info and last_play_info[0].type == "skip":
+                self.skip = False  # 消耗skip状态
+            
             # 跳牌后直接切换到跳牌玩家的下家
             self.cur_location = (self.cur_location + self.dir) % self.player_num
             self.turn_action_taken = False
@@ -805,7 +887,13 @@ class Game:
         # 检查是否打出了reverse牌，如果是则立即切换到下一个玩家
         last_play_info = self.playedcards.get_last_play_info()
         if last_play_info and last_play_info[0].type == "reverse":
-            self.next_player()
+            # 记录方向倒转历史
+            self.add_history("方向倒转！")
+            # reverse已经在change_flag()中改变了方向，这里只需要切换到下一个玩家
+            self.cur_location = (self.cur_location + self.dir) % self.player_num
+            self.turn_action_taken = False
+            self.clear_state()
+            self.turn_count += 1
             if self.gui:
                 self.gui.show_game_round()
             return
@@ -917,10 +1005,12 @@ class Game:
         self.cur_location = jumper.position
 
         # 处理跳牌的出牌动作
+        # 跳牌后的下一个玩家应该是跳牌玩家的下家
+        next_player_after_jump = (jumper.position + self.dir) % self.player_num
         action = PlayAction(
             card=original_card,
             source=jumper,
-            target=self.get_next_player(jumper.position),
+            target=self.player_list[next_player_after_jump],
             virtual_card=virtual_card
         )
 
