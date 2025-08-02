@@ -503,6 +503,9 @@ class MainWindow(QWidget):
         self.game = Game(player_num=num_players, mode=mode)
         self.game.set_gui(self)
 
+        # 重置武圣状态
+        self.wusheng_active = False
+
         # 1. 初始化玩家，这会填充 self.game.player_list
         self.game.initialize_players(player_hero_name=player_hero, ai_hero_names=other_heros)
         
@@ -527,6 +530,8 @@ class MainWindow(QWidget):
     def show_game_round(self, first_round=False):
         # --- 回合开始前的状态检查 ---
         # 状态清理和跳过逻辑现在完全由 game.next_player() 处理
+        
+        # 注意：武圣状态不应该在这里重置，因为武圣激活后需要保持状态直到出牌或取消
         
         cur_idx, player, hand, draw_n, can_draw_chain = self.get_cur_player_info()
         human_player = self.game.player_list[0] # 总是获取人类玩家
@@ -582,8 +587,16 @@ class MainWindow(QWidget):
 
             # 新增：检查玩家是否能出牌
             can_play = player.can_play_any_card()
+            
+            # 检查是否有加牌串待处理
+            is_forced_draw_pending = draw_n > 0
+            
+            # 如果有加牌串，禁用出牌和技能按钮，只允许摸牌
+            if is_forced_draw_pending:
+                can_play = False
+            
             # 由于现在出牌/摸牌/发动技能后会自动结束回合，结束回合按钮始终禁用
-            self.render_action_area(draw_n=draw_n, can_draw_chain=can_draw_chain, can_play=can_play, end_enabled=False)
+            self.render_action_area(is_forced_draw_pending=is_forced_draw_pending, can_play=can_play, end_enabled=False)
 
     def render_hand_area(self, hand, draw_n, can_draw_chain, enable_click=True):
         """渲染手牌区域"""
@@ -613,7 +626,7 @@ class MainWindow(QWidget):
             self.card_buttons.append(card_button)
             self.card_area_layout.addWidget(card_button)
 
-    def render_action_area(self, draw_n=0, can_draw_chain=False, can_play=True, end_enabled=False):
+    def render_action_area(self, is_forced_draw_pending=False, can_play=True, end_enabled=False):
         """渲染操作按钮区域"""
         # 清空旧按钮
         while self.action_area_layout.count():
@@ -627,7 +640,7 @@ class MainWindow(QWidget):
             if hasattr(self, attr):
                 delattr(self, attr)
 
-        cur_player = self.game.player_list[self.game.cur_location]
+        cur_player = self.game.player_list[self.game.cur_location] # This is the human player (pos 0)
         
         active_skills = []
         if cur_player.mr_card and cur_player.mr_card.skills:
@@ -649,7 +662,8 @@ class MainWindow(QWidget):
         self.action_area_layout.addWidget(self.play_btn)
 
         # 摸牌按钮
-        self.draw_btn = QPushButton('摸牌')
+        draw_btn_text = '强制摸牌' if is_forced_draw_pending else '摸牌'
+        self.draw_btn = QPushButton(draw_btn_text)
         btn_style = """
             QPushButton { font-size: 16px; font-weight: bold; color: white; background-color: #3498db; 
                           border: 2px solid #2980b9; border-radius: 8px; padding: 8px 12px; min-height: 35px; }
@@ -661,9 +675,11 @@ class MainWindow(QWidget):
         self.draw_btn.setEnabled(not self.game.turn_action_taken)
         self.action_area_layout.addWidget(self.draw_btn)
 
-        # 技能按钮
+        # 技能按钮 - 在需要强制摸牌时禁用
         if active_skills:
-            self.skill_btn = QPushButton('技能')
+            # 根据武圣状态设置按钮文本
+            skill_btn_text = '取消武圣' if self.wusheng_active else '技能'
+            self.skill_btn = QPushButton(skill_btn_text)
             btn_style = """
                 QPushButton { font-size: 16px; font-weight: bold; color: white; background-color: #9b59b6; 
                               border: 2px solid #8e44ad; border-radius: 8px; padding: 8px 12px; min-height: 35px; }
@@ -672,7 +688,8 @@ class MainWindow(QWidget):
             """
             self.skill_btn.setStyleSheet(btn_style)
             self.skill_btn.clicked.connect(self.on_skill_button_clicked)
-            self.skill_btn.setEnabled(not self.game.turn_action_taken)
+            # 在需要强制摸牌时禁用技能按钮
+            self.skill_btn.setEnabled(not self.game.turn_action_taken and not is_forced_draw_pending)
             self.action_area_layout.addWidget(self.skill_btn)
 
         # 结束回合按钮
@@ -734,6 +751,16 @@ class MainWindow(QWidget):
 
     def on_skill_button_clicked(self):
         """处理技能按钮的点击事件"""
+        # 检查是否武圣已激活，如果是则取消武圣状态
+        if self.wusheng_active:
+            self.wusheng_active = False
+            self.show_temporary_message("武圣技能已取消", 1500)
+            # 立即更新技能按钮文本
+            if hasattr(self, 'skill_btn'):
+                self.skill_btn.setText('技能')
+            self.show_game_round()
+            return
+        
         # 调用原有的技能按钮逻辑
         cur_player = self.game.player_list[self.game.cur_location]
         active_skills = []
@@ -798,7 +825,7 @@ class MainWindow(QWidget):
         self.wusheng_active = True
         
         # 显示提示信息
-        self.show_message_box("武圣技能", "武圣技能已激活！请选择一张红色牌，它将作为红+2打出。")
+        self.show_temporary_message("武圣技能已激活！请选择一张红色牌，它将作为红+2打出。再次点击技能按钮可取消。", 3000)
         
         # 刷新界面，让玩家选择牌
         self.show_game_round()
@@ -878,17 +905,32 @@ class MainWindow(QWidget):
         card_info_text = "上一张牌: 无"
         if last_card:
             card_display_str = ""
-            # Use more detailed card description, for wild and wild_draw4, color should be black
             if last_card.type == 'number':
+                # 颜色数字
                 card_display_str = f"{color_map.get(last_card.color, '')} <b>{last_card.value}</b>"
-            elif last_card.type in ['wild', 'wild_draw4']:
-                type_map = {'wild': '万能牌', 'wild_draw4': '王牌+4'}
-                # For wild and wild_draw4, if a color has been specified, display that color
-                if last_card.type == 'wild' and self.game.cur_color != 'black':
-                    card_display_str = f"{color_map.get(self.game.cur_color, '')} <b>{type_map.get(last_card.type)}</b>"
+            elif last_card.type == 'wild':
+                # 万能牌(选定颜色)
+                if self.game.cur_color != 'black':
+                    card_display_str = f"<b>万能牌({color_map.get(self.game.cur_color, '')})</b>"
                 else:
-                    card_display_str = f"<b>{type_map.get(last_card.type)}</b>"
+                    card_display_str = f"<b>万能牌</b>"
+            elif last_card.type == 'wild_draw4':
+                # 万能+4牌(选定颜色)
+                if self.game.cur_color != 'black':
+                    card_display_str = f"<b>万能+4牌({color_map.get(self.game.cur_color, '')})</b>"
+                else:
+                    card_display_str = f"<b>万能+4牌</b>"
+            elif last_card.type == 'reverse':
+                # 颜色转
+                card_display_str = f"{color_map.get(last_card.color, '')} <b>转</b>"
+            elif last_card.type == 'skip':
+                # 颜色禁
+                card_display_str = f"{color_map.get(last_card.color, '')} <b>禁</b>"
+            elif last_card.type == 'draw2':
+                # 颜色+2
+                card_display_str = f"{color_map.get(last_card.color, '')} <b>+2</b>"
             else:
+                # 其他情况保持原样
                 type_map = {'draw2': '+2', 'reverse': '反转', 'skip': '跳过'}
                 card_display_str = f"{color_map.get(last_card.color, '')} <b>{type_map.get(last_card.type, '')}</b>"
             
@@ -1192,8 +1234,9 @@ class HistoryDialog(QDialog):
                 border: 2px solid #34495e;
                 border-radius: 8px;
                 padding: 10px;
-                font-size: 14px;
-                line-height: 1.4;
+                font-family: "隶书", "LiSu", serif;
+                font-size: 24px;
+                line-height: 1.8;
             }
             QPushButton {
                 background-color: #3498db;
@@ -1216,7 +1259,7 @@ class HistoryDialog(QDialog):
         
         # 标题
         title_label = QLabel('游戏历史记录')
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: white; margin: 10px;")
+        title_label.setStyleSheet("font-family: '隶书', 'LiSu', serif; font-size: 28px; font-weight: bold; color: white; margin: 10px;")
         title_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(title_label)
         

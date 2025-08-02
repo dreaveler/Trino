@@ -3,6 +3,14 @@ import os
 import json
 import sys
 import random
+from typing import List, TYPE_CHECKING
+if TYPE_CHECKING:
+    from game import Game
+    from mr_cards import MrCard
+from card import UnoCard
+from util import PlayAction
+
+HAND_LIMIT = 20
 
 class AI:
     def __init__(self, ai_level='rule_based'):
@@ -122,6 +130,325 @@ class AI:
         
         opponents.sort(key=lambda p: len(p.uno_list))
         return opponents[0]
+
+# ==================== AI玩家专用函数 ====================
+class AIPlayer:
+    """AI玩家的专用函数类"""
+    
+    @staticmethod
+    def ai_choose_cards_to_discard(player, num_to_discard: int) -> List[UnoCard]:
+        """AI选择要弃置的牌的逻辑。简单策略：优先弃置高点数数字牌。"""
+        # 按点数降序排序，优先保留功能牌和低点数牌
+        sorted_hand = sorted(player.uno_list, key=lambda c: c.value if c.type == 'number' else -1, reverse=True)
+        return sorted_hand[:num_to_discard]
+
+    @staticmethod
+    def ai_draw_cards(player, num_to_draw: int, from_deck: bool = True, specific_cards: List[UnoCard] = None, is_skill_draw: bool = False):
+        """AI摸牌的核心逻辑"""
+        if not player.game:
+            return
+
+        cards_drawn = []
+        if specific_cards:
+            cards_drawn = specific_cards
+        elif from_deck:
+            for _ in range(num_to_draw):
+                # 检查手牌上限，如果已达到上限则停止摸牌
+                if len(player.uno_list) >= player.hand_limit:
+                    print(f"AI玩家 {player.position+1} ({player.mr_card.name}) 手牌已达上限({player.hand_limit})，停止摸牌。")
+                    # 记录到历史：达到手牌上限，停止摸牌
+                    if player.game and not is_skill_draw:
+                        player.game.add_history(f"{player.mr_card.name} 手牌已达上限({player.hand_limit})，停止摸牌")
+                    break
+                if player.game.unocard_pack:
+                    cards_drawn.append(player.game.unocard_pack.pop())
+                else:
+                    break
+        
+        if not cards_drawn:
+            return
+
+        player.uno_list.extend(cards_drawn)
+        # 只有非技能摸牌才显示print信息和历史记录
+        if not is_skill_draw:
+            print(f"AI玩家 {player.position+1} 获得了 {len(cards_drawn)} 张牌。")
+            # 历史记录：摸牌（技能发动的摸牌不记录，避免重复）
+            if player.game:
+                player.game.add_history(f"{player.mr_card.name} 摸了 {len(cards_drawn)} 张牌")
+        # 摸牌后，立即检查手牌上限
+        player.game.check_hand_limit_and_discard_if_needed(player)
+
+    @staticmethod
+    def ai_handle_forced_draw(player):
+        """AI处理被动响应摸牌（例如被+2/+4）"""
+        # 先完成强制摸牌（遵守手牌上限）
+        actual_draw_n = min(player.game.draw_n, player.hand_limit - len(player.uno_list))
+        if actual_draw_n > 0:
+            AIPlayer.ai_draw_cards(player, actual_draw_n)
+        else:
+            # 如果已经达到手牌上限，记录到历史
+            if player.game:
+                player.game.add_history(f"{player.mr_card.name} 手牌已达上限({player.hand_limit})，无法强制摸牌")
+        
+        # 强制摸牌完成后，检查是否有技能可以响应（如奸雄）
+        jianxiong_skill = next((s for s in player.mr_card.skills if s.__class__.__name__ == 'JianXiong'), None)
+        if jianxiong_skill and player.game.draw_chain_cards:
+            # AI决策是否发动奸雄
+            if player.game.ai_handler.decide_jianxiong(player, player.game.draw_chain_cards):
+                player.game.execute_skill_jianxiong(player)
+        
+        player.game.draw_n = 0
+        player.game.draw_chain_cards.clear()
+
+    @staticmethod
+    def ai_play(player, card_idx: int, wusheng_active: bool = False):
+        """AI主动出牌"""
+        is_valid, message, card_to_play, original_card = player.validate_play(card_idx, wusheng_active)
+        if not is_valid:
+            print(f"AI出牌无效: {message}")
+            return
+
+        # AI选择颜色（简化逻辑，默认红色）
+        color_choice = 'red' if card_to_play.type in ['wild', 'wild_draw4'] else None
+
+        # 对于reverse卡牌，需要特殊处理target_player
+        if original_card.type == 'reverse':
+            # 计算方向改变后的下一个玩家
+            new_dir = -player.game.dir  # 方向改变后的方向
+            next_pos_after_reverse = (player.position + new_dir) % player.game.player_num
+            target_player = player.game.player_list[next_pos_after_reverse]
+        else:
+            target_player = player.game.get_next_player(player.position)
+        
+        action = PlayAction(
+            card=original_card,
+            source=player,
+            target=target_player,
+            color_choice=color_choice,
+            virtual_card=card_to_play if wusheng_active and original_card.color == 'red' else None
+        )
+        # 历史记录：出牌信息
+        base_record = f"{player.mr_card.name} - {original_card} -> {target_player.mr_card.name}"
+        player.game.add_history(base_record)
+        player.game.turn_action_taken = True
+        player.game.process_play_action(action)
+        
+        # 检查是否是最后一张黑色牌，如果是则摸一张
+        if hasattr(player, '_last_card_is_black') and player._last_card_is_black:
+            AIPlayer.ai_draw_cards(player, 1)
+            player.game.add_history(f"{player.mr_card.name} 打出最后一张黑色牌，摸了一张牌")
+            player._last_card_is_black = False  # 重置标记
+
+    @staticmethod
+    def _validate_ai_play(player, card_idx: int, wusheng_active: bool):
+        """AI出牌验证"""
+        if card_idx is None or card_idx >= len(player.uno_list):
+            return False, "无效的卡牌索引。", None, None
+
+        original_card = player.uno_list[card_idx]
+        card_to_play = original_card
+        if wusheng_active and original_card.color == 'red':
+            from card import UnoCard
+            card_to_play = UnoCard('draw2', 'red', 0)
+
+        if not player.check_card(card_to_play):
+            return False, "这张牌不符合出牌规则。", None, None
+
+        # 最后一张牌是黑色牌的特殊处理：允许出牌，但出牌后需要摸一张
+        if len(player.uno_list) == 1 and card_to_play.type in ['wild', 'wild_draw4']:
+            # 标记这是最后一张黑色牌，需要在出牌后摸一张
+            player._last_card_is_black = True
+
+        return True, "有效出牌", card_to_play, original_card
+
+    @staticmethod
+    def _activate_ai_skill(player, skill_name: str):
+        """AI技能发动"""
+        if player.game:
+            # 详细历史记录
+            for skill in player.mr_card.skills:
+                if skill.name == skill_name:
+                    if hasattr(skill, 'use'):
+                        # 武圣等主动技能
+                        text = skill.use(player.uno_list[0]) if player.uno_list else None
+                        if text:
+                            player.game.add_history(text)
+                    elif hasattr(skill, 'record_history'):
+                        # 反间等特殊技能
+                        # 具体参数在_fanjian流程中写入
+                        pass
+                    else:
+                        player.game.add_history(f"{player.mr_card.name} 发动[{skill_name}] 效果：{skill.description}")
+        if skill_name == '反间':
+            AIPlayer._activate_ai_fanjian(player)
+        # ... 其他技能可以在此添加
+        else:
+            print(f"AI技能 [{skill_name}] 的逻辑尚未完全移至Player。")
+
+    @staticmethod
+    def _activate_ai_fanjian(player):
+        """AI反间技能处理"""
+        # AI反间逻辑：选择一张非黑色牌给目标玩家
+        # 1. 过滤出非黑色牌
+        non_black_cards = [card for card in player.uno_list if card.color != 'black']
+        if not non_black_cards:
+            print(f"AI {player.mr_card.name} 没有非黑色牌，无法发动【反间】")
+            return
+        
+        # 2. 选择一张非黑色牌（AI选择第一张）
+        card_to_give = non_black_cards[0]
+        
+        # 3. 选择目标（AI选择手牌最少的对手）
+        opponents = [p for p in player.game.player_list if p != player]
+        if not opponents:
+            print(f"AI {player.mr_card.name} 没有可选择的对手")
+            return
+        
+        target = min(opponents, key=lambda p: len(p.uno_list))
+        
+        # 4. 结算"给牌"动作
+        player.uno_list.remove(card_to_give)
+        target.uno_list.append(card_to_give)
+        
+        # 5. 目标弃牌
+        color_to_discard = card_to_give.color
+        cards_to_discard_indices = [i for i, c in enumerate(target.uno_list) if c.color == color_to_discard]
+        if cards_to_discard_indices:
+            discarded_cards = target.fold_card(cards_to_discard_indices)
+        else:
+            discarded_cards = []
+        
+        # 6. 记录历史
+        message = f"AI {player.mr_card.name} 发动【反间】，将 {card_to_give} 给了 {target.mr_card.name}"
+        print(message)
+        if player.game:
+            player.game.add_history(f"{player.mr_card.name} 发动[反间]，将 [{card_to_give}] 给了 {target.mr_card.name}")
+        
+        # 7. 检查目标胜利条件
+        if len(target.uno_list) == 0:
+            player.game.game_over = True
+            if player.game.gui:
+                player.game.gui.show_winner_and_exit(target)
+            return
+        
+        # 8. 刷新游戏界面
+        player.game.turn_action_taken = True
+        if player.game.gui:
+            player.game.gui.show_game_round()
+
+    @staticmethod
+    def _ai_choose_fanjian_color(player):
+        """AI反间颜色选择"""
+        # AI默认选择红色
+        return 'red'
+
+    @staticmethod
+    def _check_ai_jump(player, last_card: UnoCard) -> List:
+        """AI跳牌检查"""
+        potential_jumps = []
+        if not last_card:
+            return potential_jumps
+
+        for i, card in enumerate(player.uno_list):
+            # 1. 标准跳牌: 颜色、类型、数值完全一致（黑色牌不能跳牌）
+            if (card.color == last_card.color and card.type == last_card.type and card.value == last_card.value and 
+                card.type not in ['wild', 'wild_draw4']):
+                potential_jumps.append({'original_card': card, 'virtual_card': None})
+
+            # 2. 武圣跳牌:  红色牌 跳 红色+2
+            if last_card.type == 'draw2' and last_card.color == 'red':
+                if player.mr_card and any(s.name == '武圣' for s in player.mr_card.skills):
+                    if card.color == 'red' and card.type not in ['wild', 'wild_draw4']:
+                        from card import UnoCard # 确保 UnoCard 被导入
+                        virtual_card = UnoCard('draw2', 'red', 0)
+                        potential_jumps.append({'original_card': card, 'virtual_card': virtual_card})
+        
+        return potential_jumps
+
+    @staticmethod
+    def _ai_play_a_hand(player, i: int):
+        """AI打牌"""
+        return player.uno_list.pop(i)
+
+    @staticmethod
+    def _ai_play_card_object(player, card: UnoCard):
+        """AI打牌对象"""
+        try:
+            player.uno_list.remove(card)
+        except ValueError:
+            print(f"错误：AI玩家 {player.position} 手牌中没有 {card}")
+
+    @staticmethod
+    def _ai_fold_card(player, indices: list):
+        """AI弃牌"""
+        # 从大到小排序，防止删除时索引变化
+        indices.sort(reverse=True)
+        cards_folded = []
+        for i in indices:
+            if i < len(player.uno_list):
+                cards_folded.append(player.uno_list.pop(i))
+        return cards_folded
+
+    @staticmethod
+    def _ai_fold_card_objects(player, cards_to_fold: List[UnoCard]):
+        """AI根据卡牌对象弃牌"""
+        cards_folded = []
+        for card in cards_to_fold:
+            try:
+                player.uno_list.remove(card)
+                cards_folded.append(card)
+            except ValueError:
+                print(f"警告: AI尝试弃掉不存在的牌 {card}")
+        return cards_folded
+
+    @staticmethod
+    def _check_ai_card(player, card: UnoCard):
+        """AI卡牌检查"""
+        last_card = player.game.playedcards.get_one()
+        cur_color = player.game.cur_color
+        
+        # 检查+2/+4叠加规则：只有在draw_n > 0时才应用
+        if player.game.draw_n > 0 and last_card:
+            if last_card.type == 'draw2':
+                # +2上只能叠+2或+4
+                if card.type not in ['draw2', 'wild_draw4']:
+                    return False
+            elif last_card.type == 'wild_draw4':
+                # +4上只能叠+4
+                if card.type != 'wild_draw4':
+                    return False
+        
+        # 检查倾国技能
+        if player.mr_card:
+            qingguo_skill = next((s for s in player.mr_card.skills if s.name == '倾国'), None)
+            if qingguo_skill and card.color == 'blue':
+                return True # 蓝色牌可以当任何颜色出
+
+            # 检查龙胆技能
+            longdan_skill = next((s for s in player.mr_card.skills if s.name == '龙胆'), None)
+            if longdan_skill:
+                if card.color == 'red' and cur_color == 'blue':
+                    return True
+                if card.color == 'blue' and cur_color == 'red':
+                    return True
+
+        if card.type == 'wild' or card.type == 'wild_draw4':
+            return True
+        if card.color == cur_color:
+            return True
+        if last_card and card.type == last_card.type and card.type != 'number':
+            return True
+        if last_card and card.type == 'number' and last_card.type == 'number' and card.value == last_card.value:
+            return True
+        return False
+
+    @staticmethod
+    def _ai_can_play_any_card(player) -> bool:
+        """AI检查手牌中是否有任何可以合法打出的牌"""
+        for card in player.uno_list:
+            if player.check_card(card):
+                return True
+        return False
 
 class DeepSeekAI:
     def __init__(self):
