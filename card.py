@@ -12,38 +12,34 @@ class UnoCard:
         self.color = color
         self.value = value
 
-    @property
-    def content(self):
-        """返回卡牌内容的字符串描述，用于UI显示"""
-        if self.type == 'number':
-            return f"[{self.color}] {self.value}"
-        elif self.type == 'reverse':
-            return f"[{self.color}] 反转"
-        elif self.type == 'skip':
-            return f"[{self.color}] 跳过"
-        elif self.type == 'draw2':
-            return f"[{self.color}] +2"
-        elif self.type == 'wild':
-            return "[万能牌]"
-        elif self.type == 'wild_draw4':
-            return "[+4 万能牌]"
-        return f"[{self.color}] {self.type}"
-
     def __str__(self):
         return f"{self.color} {self.type} {self.value}"
 
-class MRCard:
-    def __init__(self, name: str, gender: str, team: str, skills: list, image_path: str = None, skill_description: str = ""):
-        self.name = name          # 武将名
-        self.gender = gender      # 性别 'male'/'female'
-        self.team = team          # 势力
-        self.skills = skills      # 技能列表（Skill对象）
-        self.image_path = image_path # 武将图片路径
-        self.skill_description = skill_description # 技能描述
+    def Key(self):#整理手牌用，用法为uno_list.sort(key=lambda card: card.Key())
+        value=self.value
+        if self.color=='red':
+            value+=100
+        elif self.color=='yellow':
+            value+=200
+        elif self.color=='blue':
+            value+=300
+        elif self.color == 'green':
+            value+=400
+        elif self.color=='wild':
+            value+=500
+        elif self.color=='wild_draw4':
+            value+=600
+        if self.type=='reverse':
+            value+=10
+        elif self.type=='skip':
+            value+=20
+        elif self.type=='draw2':
+            value+=30
+        return value
 
-    def use_skill(self, skill_name, *args, **kwargs):
-        """发动指定技能"""
-        for skill in self.skills:
-            if skill.name == skill_name:
-                return skill(*args, **kwargs)
-        raise ValueError(f"未找到技能: {skill_name}")
+
+class MRCard:
+    def __init__(self, team: str, skill: Callable, gender:str):
+        self.team = team
+        self.skill = skill
+        self.gender = gender
