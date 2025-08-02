@@ -110,3 +110,18 @@ class NanManRuQin:
             if card.type in ['draw2', 'wild_draw4']:
                 return i
         return None
+
+class PinDian:
+    def __init__(self,player1:Player,player2:Player):
+        self.player1=player1
+        self.player2=player2
+
+    def __call__(self):
+        card1=self.player1.play_out_of_turn()
+        card2=self.player2.play_out_of_turn()
+        if card1.value>card2:
+            self.player2.uno_list+=[card1,card2]
+            return True
+        else:
+            self.player1.uno_list+=[card1,card2]
+            return False
