@@ -58,13 +58,18 @@ class HuJia(Skill):
 
 class JiZhi(Skill):
     def __init__(self):
-        super().__init__('集智','当你打出[+2]/[+4]/[换色]时，可以弃置1张牌','active')
+        super().__init__('集智','当你打出[+2]/[+4]/[换色]时，你可以弃置2张牌。','active')
     def __call__(self, card:UnoCard, player:Player, index):
         if card.type=='draw2' or card.type=='wild_draw4' or card.type=='wild':
-            player.fold_card(index)
-        else:
-            return card
-            print('当前卡牌不符合技能发动条件')
+            # 检查玩家是否有足够的牌可以弃置
+            if len(player.uno_list) >= 2:
+                # 让玩家选择弃置2张牌
+                cards_to_discard = player.choose_cards_to_discard(2)
+                if cards_to_discard:
+                    for card_idx in sorted(cards_to_discard, reverse=True):
+                        player.fold_card(card_idx)
+                    return f"{player.mr_card.name} 发动[集智]，弃置了2张牌"
+        return None
 
 class QiXi(Skill):
     def __init__(self):
@@ -90,3 +95,51 @@ class ZiShou(Skill):
 class ZongShi(Skill):
     def __init__(self):
         super().__init__('宗室', '（主公技）其他【群】势力玩家被加牌时，其可以令你弃置1张牌。', 'passive')
+
+class DiMeng(Skill):
+    def __init__(self):
+        super().__init__('缔盟', '你摸x张牌并指定两名其他玩家交换手牌，x为两人手牌数目之差。手牌数大于6时此技能失效。', 'active', is_active_in_turn=True)
+
+class XuanFeng(Skill):
+    def __init__(self):
+        super().__init__('旋风', '当你跳牌时，可以弃置所有与该牌点数相同的牌。', 'active')
+    def __call__(self, jump_card: UnoCard, player: Player):
+        """旋风技能：跳牌时弃置所有相同点数的牌"""
+        if jump_card.type == 'number':
+            # 找到所有与跳牌value相同的牌
+            same_value_cards = [card for card in player.uno_list if card.type == 'number' and card.value == jump_card.value]
+            if same_value_cards:
+                # 让玩家选择是否发动技能
+                if player.choose_to_use_skill(self.name):
+                    # 弃置所有相同value的牌
+                    cards_to_discard = []
+                    for card in same_value_cards:
+                        idx = player.uno_list.index(card)
+                        cards_to_discard.append(idx)
+                    
+                    # 按索引从大到小排序，避免删除时索引变化
+                    for idx in sorted(cards_to_discard, reverse=True):
+                        player.fold_card(idx)
+                    
+                    return f"{player.mr_card.name} 发动[旋风]，弃置了 {len(same_value_cards)} 张相同点数的牌"
+        return None
+
+class SanYao(Skill):
+    def __init__(self):
+        super().__init__('散谣', '当你跳牌时，你可以指定一名玩家摸2张牌。', 'active')
+    def __call__(self, jump_card: UnoCard, player: Player, target_player: Player):
+        """散谣技能：跳牌时指定一名玩家摸2张牌"""
+        if player.choose_to_use_skill(self.name):
+            # 让目标玩家摸2张牌
+            target_player.draw_cards(2, is_skill_draw=True)
+            return f"{player.mr_card.name} 发动[散谣]，令 {target_player.mr_card.name} 摸了2张牌"
+        return None
+
+class ShiCai(Skill):
+    def __init__(self):
+        super().__init__('恃才', '（锁定技）你剩余2张牌时，须喊"UNO"。', 'passive')
+    def check_uno(self, player: Player):
+        """检查是否需要喊UNO"""
+        if len(player.uno_list) == 2:
+            return f"{player.mr_card.name} 剩余2张牌，喊出\"UNO\"！"
+        return None 

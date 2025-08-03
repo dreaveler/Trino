@@ -806,6 +806,9 @@ class MainWindow(QWidget):
             # 反间技能有自己的UI流程和刷新，这里不需要再调用show_game_round
         elif skill.name == '武圣':
             self.activate_wusheng_skill()
+        elif skill.name == '缔盟':
+            player.activate_skill('缔盟')
+            # 缔盟技能有自己的UI流程和刷新，这里不需要再调用show_game_round
         else:
             self.show_message_box("提示", f"技能 [{skill.name}] 的界面交互尚未实现。")
             # 不再在这里调用show_game_round，由on_skill_button_clicked统一处理
@@ -862,6 +865,123 @@ class MainWindow(QWidget):
         """弹窗让玩家从手牌中选择一张牌"""
         return self.choose_specific_card_dialog(player, player.uno_list, prompt)
 
+    def choose_cards_to_discard_dialog(self, player, num_to_discard):
+        """让玩家选择要弃置的牌的对话框"""
+        cards = player.uno_list
+        if len(cards) < num_to_discard:
+            return None
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("选择要弃置的牌")
+        dialog.setModal(True)
+        dialog.resize(500, 400)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # 提示文本
+        prompt_label = QLabel(f"请选择 {num_to_discard} 张牌来弃置：")
+        prompt_label.setStyleSheet("font-size: 16px; color: white; margin: 10px;")
+        layout.addWidget(prompt_label)
+        
+        # 卡牌选择区域
+        card_widget = QWidget()
+        card_layout = QHBoxLayout(card_widget)
+        card_layout.setSpacing(10)
+        
+        selected_indices = []
+        card_buttons = []
+        
+        def on_card_clicked(idx):
+            if idx in selected_indices:
+                selected_indices.remove(idx)
+                card_buttons[idx].setStyleSheet("""
+                    QPushButton {
+                        background-color: #34495e;
+                        border: 2px solid #2c3e50;
+                        border-radius: 8px;
+                        padding: 5px;
+                        min-width: 80px;
+                        min-height: 120px;
+                    }
+                    QPushButton:hover {
+                        background-color: #2c3e50;
+                    }
+                """)
+            else:
+                if len(selected_indices) < num_to_discard:
+                    selected_indices.append(idx)
+                    card_buttons[idx].setStyleSheet("""
+                        QPushButton {
+                            background-color: #e74c3c;
+                            border: 2px solid #c0392b;
+                            border-radius: 8px;
+                            padding: 5px;
+                            min-width: 80px;
+                            min-height: 120px;
+                        }
+                        QPushButton:hover {
+                            background-color: #c0392b;
+                        }
+                    """)
+        
+        # 创建卡牌按钮
+        for i, card in enumerate(cards):
+            card_btn = QPushButton()
+            card_btn.setFixedSize(80, 120)
+            card_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #34495e;
+                    border: 2px solid #2c3e50;
+                    border-radius: 8px;
+                    padding: 5px;
+                    min-width: 80px;
+                    min-height: 120px;
+                }
+                QPushButton:hover {
+                    background-color: #2c3e50;
+                }
+            """)
+            
+            # 设置卡牌图片
+            card_image_path = get_card_image_path(card)
+            if os.path.exists(card_image_path):
+                pixmap = QPixmap(card_image_path)
+                card_btn.setIcon(QIcon(pixmap))
+                card_btn.setIconSize(QSize(70, 110))
+            
+            card_btn.clicked.connect(lambda checked, idx=i: on_card_clicked(idx))
+            card_buttons.append(card_btn)
+            card_layout.addWidget(card_btn)
+        
+        layout.addWidget(card_widget)
+        
+        # 按钮区域
+        button_layout = QHBoxLayout()
+        
+        confirm_btn = QPushButton("确认")
+        confirm_btn.setEnabled(False)
+        confirm_btn.clicked.connect(dialog.accept)
+        
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(dialog.reject)
+        
+        button_layout.addWidget(confirm_btn)
+        button_layout.addWidget(cancel_btn)
+        layout.addLayout(button_layout)
+        
+        # 更新确认按钮状态
+        def update_confirm_button():
+            confirm_btn.setEnabled(len(selected_indices) == num_to_discard)
+        
+        # 监听选择变化
+        for btn in card_buttons:
+            btn.clicked.connect(update_confirm_button)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            return selected_indices
+        else:
+            return None
+
     def update_draw_pile_count(self):
         """更新牌堆数量标签"""
         count = len(self.game.unocard_pack)
@@ -879,8 +999,20 @@ class MainWindow(QWidget):
         
         # 根据游戏状态确定出牌要求
         if self.game.draw_n > 0:
-            # 如果有强制摸牌，显示摸牌要求
-            draw_requirement_text = f"当前出牌要求: <b>必须摸{self.game.draw_n}张牌或出+2/+4</b>"
+            # 如果有强制摸牌，根据加牌串中最后一张牌的类型显示正确的出牌要求
+            if self.game.draw_chain_cards:
+                # 获取加牌串中最后一张牌的类型
+                last_chain_card = self.game.draw_chain_cards[-1][0]  # effective_card
+                if last_chain_card.type == 'draw2':
+                    draw_requirement_text = f"当前出牌要求: <b>必须摸{self.game.draw_n}张牌或出+2/+4</b>"
+                elif last_chain_card.type == 'wild_draw4':
+                    draw_requirement_text = f"当前出牌要求: <b>必须摸{self.game.draw_n}张牌或出+4</b>"
+                else:
+                    # 默认情况
+                    draw_requirement_text = f"当前出牌要求: <b>必须摸{self.game.draw_n}张牌或出+2/+4</b>"
+            else:
+                # 没有加牌串信息时的默认显示
+                draw_requirement_text = f"当前出牌要求: <b>必须摸{self.game.draw_n}张牌或出+2/+4</b>"
         else:
             # 正常出牌，显示颜色和类型要求
             if last_card:
@@ -1018,6 +1150,13 @@ class MainWindow(QWidget):
 
     def on_draw_card_clicked(self):
         player = self.game.player_list[0] # 假设人类玩家总是0号
+        
+        # 显示摸牌提示
+        if self.game.draw_n > 0:
+            self.show_temporary_message(f"{player.mr_card.name} 摸了 {self.game.draw_n} 张牌", duration=2000)
+        else:
+            self.show_temporary_message(f"{player.mr_card.name} 摸了 1 张牌", duration=2000)
+        
         # 调用game.py中的核心逻辑
         self.game.handle_player_draw(player)
         # 执行摸牌后，禁用所有行动按钮
@@ -1193,26 +1332,20 @@ class MainWindow(QWidget):
 
     def disable_action_buttons(self):
         """禁用所有行动按钮"""
-        if hasattr(self, 'play_btn') and self.play_btn and not self.play_btn.isHidden():
+        # 检查按钮是否存在且未被删除
+        def safe_disable_button(button_name):
             try:
-                self.play_btn.setEnabled(False)
-            except RuntimeError:
-                pass  # 按钮已被删除
-        if hasattr(self, 'draw_btn') and self.draw_btn and not self.draw_btn.isHidden():
-            try:
-                self.draw_btn.setEnabled(False)
-            except RuntimeError:
-                pass  # 按钮已被删除
-        if hasattr(self, 'skill_btn') and self.skill_btn and not self.skill_btn.isHidden():
-            try:
-                self.skill_btn.setEnabled(False)
-            except RuntimeError:
-                pass  # 按钮已被删除
-        if hasattr(self, 'end_btn') and self.end_btn and not self.end_btn.isHidden():
-            try:
-                self.end_btn.setEnabled(False)
-            except RuntimeError:
-                pass  # 按钮已被删除
+                if hasattr(self, button_name):
+                    button = getattr(self, button_name)
+                    if button and not button.isHidden():
+                        button.setEnabled(False)
+            except (RuntimeError, AttributeError):
+                pass  # 按钮已被删除或不存在
+        
+        safe_disable_button('play_btn')
+        safe_disable_button('draw_btn')
+        safe_disable_button('skill_btn')
+        safe_disable_button('end_btn')
 
 # 在文件开头添加历史记录对话框类
 class HistoryDialog(QDialog):

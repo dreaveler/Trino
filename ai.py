@@ -185,6 +185,10 @@ class AIPlayer:
         actual_draw_n = min(player.game.draw_n, player.hand_limit - len(player.uno_list))
         if actual_draw_n > 0:
             AIPlayer.ai_draw_cards(player, actual_draw_n)
+            # 如果实际摸牌数少于要求的摸牌数，说明达到了手牌上限
+            if actual_draw_n < player.game.draw_n:
+                if player.game:
+                    player.game.add_history(f"{player.mr_card.name} 强制摸牌时达到手牌上限({player.hand_limit})，只摸了 {actual_draw_n} 张牌")
         else:
             # 如果已经达到手牌上限，记录到历史
             if player.game:
@@ -277,10 +281,12 @@ class AIPlayer:
                         # 反间等特殊技能
                         # 具体参数在_fanjian流程中写入
                         pass
-                    else:
+                    elif skill_name != '缔盟':  # 缔盟技能有自己的历史记录，不需要通用描述
                         player.game.add_history(f"{player.mr_card.name} 发动[{skill_name}] 效果：{skill.description}")
         if skill_name == '反间':
             AIPlayer._activate_ai_fanjian(player)
+        elif skill_name == '缔盟':
+            AIPlayer._activate_ai_dimeng(player)
         # ... 其他技能可以在此添加
         else:
             print(f"AI技能 [{skill_name}] 的逻辑尚未完全移至Player。")
@@ -331,6 +337,61 @@ class AIPlayer:
                 player.game.gui.show_winner_and_exit(target)
             return
         
+        # 8. 刷新游戏界面
+        player.game.turn_action_taken = True
+        if player.game.gui:
+            player.game.gui.show_game_round()
+
+    @staticmethod
+    def _activate_ai_dimeng(player):
+        """AI缔盟技能处理"""
+        # 1. 检查手牌数是否大于6（技能失效条件）
+        if len(player.uno_list) > 6:
+            print(f"AI {player.mr_card.name} 手牌数大于6，【缔盟】技能失效")
+            return
+
+        # 2. 选择两名其他玩家（AI选择手牌数差异最大的两个对手）
+        opponents = [p for p in player.game.player_list if p != player]
+        if len(opponents) < 2:
+            print(f"AI {player.mr_card.name} 没有足够的对手，无法发动【缔盟】")
+            return
+        
+        # 选择手牌数差异最大的两个对手
+        opponents.sort(key=lambda p: len(p.uno_list))
+        target1 = opponents[0]  # 手牌最少的
+        target2 = opponents[-1]  # 手牌最多的
+
+        # 3. 计算手牌数之差
+        hand_diff = abs(len(target1.uno_list) - len(target2.uno_list))
+        
+        # 4. 摸x张牌（x为手牌数之差）
+        if hand_diff > 0:
+            AIPlayer.ai_draw_cards(player, hand_diff, is_skill_draw=True)
+            print(f"AI {player.mr_card.name} 发动【缔盟】，摸了 {hand_diff} 张牌")
+
+        # 5. 交换两名目标玩家的手牌
+        temp_hand = target1.uno_list.copy()
+        target1.uno_list = target2.uno_list.copy()
+        target2.uno_list = temp_hand
+
+        # 6. 记录历史
+        message = f"AI {player.mr_card.name} 发动【缔盟】，{target1.mr_card.name} 和 {target2.mr_card.name} 交换了手牌"
+        print(message)
+        if player.game:
+            player.game.add_history(f"{player.mr_card.name} 发动[缔盟]，{target1.mr_card.name} 和 {target2.mr_card.name} 交换了手牌")
+
+        # 7. 检查胜利条件
+        if len(target1.uno_list) == 0:
+            player.game.game_over = True
+            if player.game.gui:
+                player.game.gui.show_winner_and_exit(target1)
+            return
+        if len(target2.uno_list) == 0:
+            player.game.game_over = True
+            if player.game.gui:
+                player.game.gui.show_winner_and_exit(target2)
+            return
+
         # 8. 刷新游戏界面
         player.game.turn_action_taken = True
         if player.game.gui:
@@ -449,6 +510,12 @@ class AIPlayer:
             if player.check_card(card):
                 return True
         return False
+
+    @staticmethod
+    def ai_choose_to_use_skill(player, skill_name: str) -> bool:
+        """AI选择是否使用技能"""
+        # AI总是选择使用技能（如果有的话）
+        return True
 
 class DeepSeekAI:
     def __init__(self):

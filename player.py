@@ -68,6 +68,10 @@ class Player:
         actual_draw_n = min(self.game.draw_n, self.hand_limit - len(self.uno_list))
         if actual_draw_n > 0:
             self.player_draw_cards(actual_draw_n)
+            # 如果实际摸牌数少于要求的摸牌数，说明达到了手牌上限
+            if actual_draw_n < self.game.draw_n:
+                if self.game:
+                    self.game.add_history(f"{self.mr_card.name} 强制摸牌时达到手牌上限({self.hand_limit})，只摸了 {actual_draw_n} 张牌")
         else:
             # 如果已经达到手牌上限，记录到历史
             if self.game:
@@ -205,10 +209,12 @@ class Player:
                         # 反间等特殊技能
                         # 具体参数在_fanjian流程中写入
                         pass
-                    else:
+                    elif skill_name != '缔盟':  # 缔盟技能有自己的历史记录，不需要通用描述
                         self.game.add_history(f"{self.mr_card.name} 发动[{skill_name}] 效果：{skill.description}")
         if skill_name == '反间':
             self._activate_player_fanjian()
+        elif skill_name == '缔盟':
+            self._activate_player_dimeng()
         # ... 其他技能可以在此添加
         else:
             if self.game.gui:
@@ -258,6 +264,54 @@ class Player:
             self.game.gui.show_winner_and_exit(target)
             return
         # 7. 刷新整个游戏界面
+        self.game.turn_action_taken = True # 发动技能视为已行动
+        self.game.gui.show_game_round()
+
+    def _activate_player_dimeng(self):
+        """玩家缔盟技能处理"""
+        if not self.game.gui: return
+
+        # 1. 检查手牌数是否大于6（技能失效条件）
+        if len(self.uno_list) > 6:
+            self.game.gui.show_message_box("提示", "手牌数大于6，【缔盟】技能失效")
+            return
+
+        # 2. 选择两名其他玩家
+        self.game.gui.show_message_box("提示", "请选择第一个目标玩家")
+        target1 = self.game.gui.choose_target_player_dialog(exclude_self=True)
+        if not target1: return
+        
+        self.game.gui.show_message_box("提示", "请选择第二个目标玩家（不能与第一个相同）")
+        target2 = self.game.gui.choose_target_player_dialog(exclude_self=True)
+        if not target2 or target2 == target1: return
+
+        # 3. 计算手牌数之差
+        hand_diff = abs(len(target1.uno_list) - len(target2.uno_list))
+        
+        # 4. 摸x张牌（x为手牌数之差）
+        if hand_diff > 0:
+            self.player_draw_cards(hand_diff, is_skill_draw=True)
+            self.game.gui.show_temporary_message(f"{self.mr_card.name} 发动【缔盟】，摸了 {hand_diff} 张牌")
+
+        # 5. 交换两名目标玩家的手牌
+        temp_hand = target1.uno_list.copy()
+        target1.uno_list = target2.uno_list.copy()
+        target2.uno_list = temp_hand
+
+        # 6. 记录历史
+        self.game.add_history(f"{self.mr_card.name} 发动[缔盟]，{target1.mr_card.name} 和 {target2.mr_card.name} 交换了手牌")
+
+        # 7. 检查胜利条件
+        if len(target1.uno_list) == 0:
+            self.game.game_over = True
+            self.game.gui.show_winner_and_exit(target1)
+            return
+        if len(target2.uno_list) == 0:
+            self.game.game_over = True
+            self.game.gui.show_winner_and_exit(target2)
+            return
+
+        # 8. 刷新整个游戏界面
         self.game.turn_action_taken = True # 发动技能视为已行动
         self.game.gui.show_game_round()
 
@@ -333,8 +387,12 @@ class Player:
                 print(f"错误：玩家 {self.position} 手牌中没有 {card}")
 
     # ==================== 弃牌函数 ====================
-    def fold_card(self, indices: list):
+    def fold_card(self, indices):
         """统一的弃牌入口，根据玩家类型调用对应函数"""
+        # 确保indices是列表
+        if not isinstance(indices, list):
+            indices = [indices]
+        
         if self.is_ai:
             return AIPlayer._ai_fold_card(self, indices)
         else:
@@ -431,3 +489,38 @@ class Player:
             if self.check_card(card):
                 return True
         return False
+
+    def choose_cards_to_discard(self, num_to_discard: int) -> List[int]:
+        """玩家选择要弃置的牌（返回牌在uno_list中的索引列表）"""
+        if len(self.uno_list) < num_to_discard:
+            return None
+        
+        if self.game.gui:
+            return self.game.gui.choose_cards_to_discard_dialog(self, num_to_discard)
+        else:
+            # 命令行模式下的简单实现
+            print(f"请选择 {num_to_discard} 张牌来弃置（输入牌的位置，用空格分隔）：")
+            for i, card in enumerate(self.uno_list):
+                print(f"{i}: {card}")
+            try:
+                indices = list(map(int, input().split()))
+                if len(indices) == num_to_discard and all(0 <= i < len(self.uno_list) for i in indices):
+                    return indices
+            except:
+                pass
+            return None
+
+    def choose_to_use_skill(self, skill_name: str) -> bool:
+        """统一的技能使用选择入口，根据玩家类型调用对应函数"""
+        if self.is_ai:
+            return AIPlayer.ai_choose_to_use_skill(self, skill_name)
+        else:
+            return self._player_choose_to_use_skill(skill_name)
+
+    def _player_choose_to_use_skill(self, skill_name: str) -> bool:
+        """玩家选择是否使用技能"""
+        if self.game and self.game.gui:
+            return self.game.gui.ask_yes_no_question("发动技能", f"是否发动【{skill_name}】？")
+        else:
+            choice = input(f"是否发动【{skill_name}】？(y/n): ")
+            return choice.lower() == 'y'

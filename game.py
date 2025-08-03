@@ -10,12 +10,7 @@ from PyQt5.QtWidgets import QMessageBox
 class Game:
     def check_jump(self):
         """统一的跳牌检查入口，根据玩家类型调用对应函数"""
-        # TODO: Add a GUI-based mechanism for human players to jump.
-        # TODO: Add AI logic for jumping.
-        # For now, this feature is disabled in GUI mode.
-        if not self.gui:
-            return self._check_jump_internal()
-        return False
+        return self._check_jump_internal()
 
     def _check_jump_internal(self):
         """跳牌检查内部实现"""
@@ -45,21 +40,36 @@ class Game:
         """AI普通跳牌处理"""
         print(f"AI玩家{player_idx+1}可以跳牌！手牌序号：{card_idx}，牌：{card}")
         # AI总是选择跳牌
-        player.play_a_hand(card_idx)
-        print(f"AI玩家{player_idx+1}跳牌打出：{card}")
+        # 从手牌移除卡牌（不进入playedcards）
+        played_card = player.play_a_hand(card_idx)
+        print(f"AI玩家{player_idx+1}跳牌打出：{played_card}")
         self.cur_location = player_idx
-        self.change_flag()
+        # 处理跳牌后的技能效果
+        self._handle_jump_skills(player, played_card)
+        # 跳牌时，+2/+4牌的效果延迟到下一个玩家回合开始时处理
+        self._handle_jump_card_effect(played_card)
         return True
 
     def _handle_player_jump(self, player, card_idx, card, player_idx):
         """玩家普通跳牌处理"""
         print(f"玩家{player_idx+1}可以跳牌！手牌序号：{card_idx}，牌：{card}")
-        choice = input(f"玩家{player_idx+1}是否跳牌？(y/n): ")
-        if choice.lower() == 'y':
-            player.play_a_hand(card_idx)
-            print(f"玩家{player_idx+1}跳牌打出：{card}")
+        
+        # GUI模式下使用对话框，非GUI模式下使用控制台输入
+        if self.gui:
+            choice = self.gui.ask_yes_no_question("跳牌", f"是否跳牌打出 {card}？")
+        else:
+            choice = input(f"玩家{player_idx+1}是否跳牌？(y/n): ")
+            choice = choice.lower() == 'y'
+        
+        if choice:
+            # 从手牌移除卡牌（不进入playedcards）
+            played_card = player.play_a_hand(card_idx)
+            print(f"玩家{player_idx+1}跳牌打出：{played_card}")
             self.cur_location = player_idx
-            self.change_flag()
+            # 处理跳牌后的技能效果
+            self._handle_jump_skills(player, played_card)
+            # 跳牌时，+2/+4牌的效果延迟到下一个玩家回合开始时处理
+            self._handle_jump_card_effect(played_card)
             return True
         return False
 
@@ -72,25 +82,130 @@ class Game:
         new_card = UnoCard('draw2', 'red', 0)
         self.playedcards.add_card(new_card)
         print(f"AI玩家{player_idx+1}武圣跳牌打出：{new_card}")
+        # 添加武圣跳牌历史记录（在跳牌动作执行后）
+        history_text = f"{player.mr_card.name} 发动武圣将红色牌作为红+2打出从而干扰跳牌"
+        print(f"添加历史记录: {history_text}")
+        self.add_history(history_text)
         self.cur_location = player_idx
-        self.change_flag()
+        # 处理跳牌后的技能效果
+        self._handle_jump_skills(player, new_card)
+        # 跳牌时，+2/+4牌的效果延迟到下一个玩家回合开始时处理
+        self._handle_jump_card_effect(new_card)
         return True
 
     def _handle_player_wusheng_jump(self, player, card_idx, card, player_idx):
         """玩家武圣跳牌处理"""
         print(f"玩家{player_idx+1}可以用武圣跳牌！手牌序号：{card_idx}，牌：{card}")
-        choice = input(f"玩家{player_idx+1}是否用武圣跳红+2？(y/n): ")
-        if choice.lower() == 'y':
+        
+        # GUI模式下使用对话框，非GUI模式下使用控制台输入
+        if self.gui:
+            choice = self.gui.ask_yes_no_question("武圣跳牌", f"是否用武圣将 {card} 当作红+2打出？")
+        else:
+            choice = input(f"玩家{player_idx+1}是否用武圣跳红+2？(y/n): ")
+            choice = choice.lower() == 'y'
+        
+        if choice:
             from card import UnoCard
             player.uno_list.pop(card_idx)
             new_card = UnoCard('draw2', 'red', 0)
             self.playedcards.add_card(new_card)
             print(f"玩家{player_idx+1}武圣跳牌打出：{new_card}")
+            # 添加武圣跳牌历史记录
+            self.add_history(f"{player.mr_card.name} 发动武圣将红色牌作为红+2打出从而干扰跳牌")
             self.cur_location = player_idx
-            self.change_flag()
+            # 处理跳牌后的技能效果
+            self._handle_jump_skills(player, new_card)
+            # 跳牌时，+2/+4牌的效果延迟到下一个玩家回合开始时处理
+            self._handle_jump_card_effect(new_card)
             return True
         return False
-    def __init__(self,player_num:int,mode:str):
+
+    def _handle_jump_card_effect(self, card):
+        """处理跳牌时的卡片效果，延迟到下一个玩家回合开始时"""
+        if card.type == "draw2" or card.type == "wild_draw4":
+            # 对于+2/+4牌，不立即增加draw_n，而是标记为延迟效果
+            # 这个效果将在下一个玩家回合开始时通过_pre_turn_checks处理
+            from card import UnoCard
+            # 创建延迟效果记录：(effective_card, original_card, source_player)
+            effective_card = UnoCard(card.type, card.color, card.value)
+            original_card = UnoCard(card.type, card.color, card.value)
+            source_player = self.player_list[self.cur_location]
+            self.pending_jump_draw_effect.append((effective_card, original_card, source_player))
+        elif card.type == "skip":
+            self.skip = True
+        elif card.type == "reverse":
+            self.dir *= -1
+        # 注意：这里不调用change_flag()，因为+2/+4的效果要延迟处理
+
+    def _handle_jump_skills(self, player, jump_card):
+        """处理跳牌后的技能效果"""
+        if not player.mr_card:
+            return
+        
+        # 检查旋风技能
+        xuanfeng_skill = next((s for s in player.mr_card.skills if s.__class__.__name__ == 'XuanFeng'), None)
+        if xuanfeng_skill:
+            if player.is_ai:
+                self._handle_ai_xuanfeng(player, xuanfeng_skill, jump_card)
+            else:
+                self._handle_player_xuanfeng(player, xuanfeng_skill, jump_card)
+        
+        # 检查散谣技能
+        sanyao_skill = next((s for s in player.mr_card.skills if s.__class__.__name__ == 'SanYao'), None)
+        if sanyao_skill:
+            if player.is_ai:
+                self._handle_ai_sanyao(player, sanyao_skill, jump_card)
+            else:
+                self._handle_player_sanyao(player, sanyao_skill, jump_card)
+
+    def _handle_ai_xuanfeng(self, player, xuanfeng_skill, jump_card):
+        """AI旋风技能处理"""
+        # AI总是发动旋风技能
+        result = xuanfeng_skill(jump_card, player)
+        if result:
+            self.add_history(result)
+
+    def _handle_player_xuanfeng(self, player, xuanfeng_skill, jump_card):
+        """玩家旋风技能处理"""
+        # 直接调用技能，技能内部会处理选择逻辑
+        result = xuanfeng_skill(jump_card, player)
+        if result:
+            self.add_history(result)
+
+    def _handle_ai_sanyao(self, player, sanyao_skill, jump_card):
+        """AI散谣技能处理"""
+        # AI选择手牌最少的对手作为目标
+        opponents = [p for p in self.player_list if p != player]
+        if opponents:
+            target = min(opponents, key=lambda p: len(p.uno_list))
+            result = sanyao_skill(jump_card, player, target)
+            if result:
+                self.add_history(result)
+
+    def _handle_player_sanyao(self, player, sanyao_skill, jump_card):
+        """玩家散谣技能处理"""
+        # 让玩家选择目标
+        if player.game and player.game.gui:
+            target = player.game.gui.choose_target_player_dialog(exclude_self=True)
+            if target:
+                result = sanyao_skill(jump_card, player, target)
+                if result:
+                    self.add_history(result)
+
+    def _check_shicai_skill(self, player):
+        """检查恃才技能（UNO提醒）"""
+        if not player.mr_card:
+            return
+        
+        shicai_skill = next((s for s in player.mr_card.skills if s.__class__.__name__ == 'ShiCai'), None)
+        if shicai_skill:
+            result = shicai_skill.check_uno(player)
+            if result:
+                self.add_history(result)
+                if self.gui:
+                    self.gui.show_temporary_message(result)
+
+    def __init__(self, player_num: int, mode: str):
         self.player_num = player_num
         self.playedcards = PlayedCards()
         self.mode = mode
@@ -109,6 +224,9 @@ class Game:
 
         # 当前的加牌链
         self.draw_chain_cards: List[UnoCard] = []
+
+        # 延迟的+2/+4效果（用于跳牌）
+        self.pending_jump_draw_effect: List[tuple] = []
 
         # 游戏是否结束的标志
         self.game_over = False
@@ -412,6 +530,22 @@ class Game:
 
     def _ai_pre_turn_checks(self, player):
         """AI回合开始前的检查，如是否必须摸牌。返回True表示回合已处理完毕。"""
+        # 首先处理延迟的+2/+4效果（来自跳牌）
+        if self.pending_jump_draw_effect:
+            for effective_card, original_card, source_player in self.pending_jump_draw_effect:
+                # 将延迟效果添加到正常的draw_chain_cards中
+                self.draw_chain_cards.append((effective_card, original_card, source_player))
+                # 增加draw_n
+                if effective_card.type == "draw2":
+                    self.draw_n += 2
+                elif effective_card.type == "wild_draw4":
+                    self.draw_n += 4
+            # 清空延迟效果
+            self.pending_jump_draw_effect.clear()
+        
+        # 检查恃才技能（UNO提醒）
+        self._check_shicai_skill(player)
+        
         # 回合开始时检查手牌上限
         if len(player.uno_list) > player.hand_limit:
             num_to_discard = len(player.uno_list) - player.hand_limit
@@ -427,6 +561,11 @@ class Game:
         if self.draw_n > 0: # If there's any pending draw penalty
             # Perform the forced draw
             print(f"AI 玩家 {player.position+1} 摸 {self.draw_n} 张牌 (强制摸牌)")
+            
+            # 显示AI摸牌提示
+            if self.gui:
+                self.gui.show_temporary_message(f"{player.mr_card.name} 摸了 {self.draw_n} 张牌", duration=2000)
+            
             player.handle_forced_draw() # This performs the actual draw based on draw_n and hand_limit
             
             # 强制摸牌完成后，检查是否有技能可以响应（如奸雄）
@@ -496,6 +635,11 @@ class Game:
         if not played_successfully:
             if self.draw_n > 0: # If there's any pending draw penalty
                 # AI chooses to take the penalty.
+                
+                # 显示AI强制摸牌提示
+                if self.gui:
+                    self.gui.show_temporary_message(f"{player.mr_card.name} 摸了 {self.draw_n} 张牌", duration=2000)
+                
                 player.handle_forced_draw() # This performs the actual draw based on draw_n and hand_limit
                 
                 # After drawing, check for JianXiong
@@ -513,6 +657,10 @@ class Game:
                 self.draw_n = 0
                 self.draw_chain_cards.clear()
             else: # Voluntary draw (draw_n == 0)
+                # 显示AI主动摸牌提示
+                if self.gui:
+                    self.gui.show_temporary_message(f"{player.mr_card.name} 摸了 1 张牌", duration=2000)
+                
                 AIPlayer.ai_draw_cards(player, 1)
             
             self.next_player()
@@ -540,9 +688,30 @@ class Game:
 
     def _player_pre_turn_checks(self, player):
         """玩家回合开始前的检查，如是否必须摸牌。返回True表示回合已处理完毕。"""
+        # 首先处理延迟的+2/+4效果（来自跳牌）
+        if self.pending_jump_draw_effect:
+            for effective_card, original_card, source_player in self.pending_jump_draw_effect:
+                # 将延迟效果添加到正常的draw_chain_cards中
+                self.draw_chain_cards.append((effective_card, original_card, source_player))
+                # 增加draw_n
+                if effective_card.type == "draw2":
+                    self.draw_n += 2
+                elif effective_card.type == "wild_draw4":
+                    self.draw_n += 4
+            # 清空延迟效果
+            self.pending_jump_draw_effect.clear()
+        
+        # 检查恃才技能（UNO提醒）
+        self._check_shicai_skill(player)
+        
         if self.draw_n > 0: # If there's any pending draw penalty
             # Perform the forced draw
             print(f"玩家 {player.position+1} 摸 {self.draw_n} 张牌 (强制摸牌)")
+            
+            # 显示玩家强制摸牌提示
+            if self.gui:
+                self.gui.show_temporary_message(f"{player.mr_card.name} 摸了 {self.draw_n} 张牌", duration=2000)
+            
             player.handle_forced_draw() # This performs the actual draw based on draw_n and hand_limit
             
             # 强制摸牌完成后，检查是否有技能可以响应（如奸雄）
@@ -572,6 +741,11 @@ class Game:
         """处理玩家摸牌"""
         if self.draw_n > 0: # If there's any pending draw penalty
             # Player chooses to take the penalty.
+            
+            # 显示玩家强制摸牌提示
+            if self.gui:
+                self.gui.show_temporary_message(f"{player.mr_card.name} 摸了 {self.draw_n} 张牌", duration=2000)
+            
             player.handle_forced_draw() # This performs the actual draw based on draw_n and hand_limit
             
             # After drawing, check for JianXiong
@@ -613,6 +787,8 @@ class Game:
         self.player_in_discard = None
         self.cards_to_draw_in_discard.clear()
         self.num_to_discard = 0
+        # 清空延迟的+2/+4效果
+        self.pending_jump_draw_effect.clear()
         # 重置GUI相关的状态
         if self.gui:
             self.gui.wusheng_active = False
@@ -692,6 +868,14 @@ class Game:
                 self._handle_ai_qixi(player, qixi_skill, card)
             else:
                 self._handle_player_qixi(player, qixi_skill, card)
+        
+        # 集智技能处理
+        jizhi_skill = next((s for s in player.mr_card.skills if s.name == '集智'), None)
+        if jizhi_skill and card.type in ['draw2', 'wild_draw4', 'wild']:
+            if player.is_ai:
+                self._handle_ai_jizhi(player, jizhi_skill, card)
+            else:
+                self._handle_player_jizhi(player, jizhi_skill, card)
 
     def _handle_ai_qixi(self, player, qixi_skill, card):
         """AI奇袭技能处理"""
@@ -716,6 +900,45 @@ class Game:
                         target_player, 
                         self.cur_location == target_player.position
                     )
+
+    def _handle_ai_jizhi(self, player, jizhi_skill, card):
+        """AI集智技能处理"""
+        if len(player.uno_list) >= 2:
+            # AI选择要弃置的牌
+            cards_to_discard = AIPlayer.ai_choose_cards_to_discard(player, 2)
+            if cards_to_discard:
+                # 找到这些牌在玩家手牌中的索引
+                indices_to_discard = []
+                for card_to_discard in cards_to_discard:
+                    try:
+                        idx = player.uno_list.index(card_to_discard)
+                        indices_to_discard.append(idx)
+                    except ValueError:
+                        continue
+                
+                # 从大到小排序索引，防止删除时索引变化
+                indices_to_discard.sort(reverse=True)
+                for card_idx in indices_to_discard:
+                    player.fold_card(card_idx)
+                
+                print(f"AI 玩家 {player.position+1} 发动【集智】，弃置了2张牌")
+                self.add_history(f"{player.mr_card.name} 发动[集智]，弃置了2张牌")
+
+    def _handle_player_jizhi(self, player, jizhi_skill, card):
+        """玩家集智技能处理"""
+        if len(player.uno_list) >= 2:
+            if self.gui and self.gui.ask_yes_no_question("发动技能", "是否发动【集智】弃置2张牌？"):
+                cards_to_discard = player.choose_cards_to_discard(2)
+                if cards_to_discard:
+                    for card_idx in sorted(cards_to_discard, reverse=True):
+                        player.fold_card(card_idx)
+                    self.add_history(f"{player.mr_card.name} 发动[集智]，弃置了2张牌")
+                    # 更新玩家信息显示
+                    if self.gui.player_widgets.get(player.position):
+                        self.gui.player_widgets[player.position].update_info(
+                            player, 
+                            self.cur_location == player.position
+                        )
 
     # ==================== 统一处理函数 ====================
     def handle_play(self, player, card_idx, wusheng_active):
@@ -806,8 +1029,9 @@ class Game:
         # 1. 从玩家手牌中移除原始牌
         player.play_card_object(original_card)
 
-        # 2. 将行动信息放入弃牌堆
-        self.playedcards.add_card(effective_card, player, original_card)
+        # 2. 将行动信息放入弃牌堆（跳牌时不添加）
+        if not is_jump:
+            self.playedcards.add_card(effective_card, player, original_card)
 
         # 3. 更新当前颜色
         self._update_color_after_play(player, effective_card, action.color_choice)
@@ -826,7 +1050,9 @@ class Game:
         self._handle_post_play_turn_logic(player, is_jump)
 
         # 7. 处理出牌后可能触发的技能（在跳牌历史记录之后）
-        self.handle_post_play_skills(player, original_card)
+        # 注意：跳牌时的技能已经在_execute_jump中处理过了
+        if not is_jump:
+            self.handle_post_play_skills(player, original_card)
 
     def _update_color_after_play(self, player, effective_card, color_choice):
         """更新出牌后的颜色"""
@@ -857,15 +1083,20 @@ class Game:
     def _handle_post_play_turn_logic(self, player, is_jump):
         """处理出牌后的回合逻辑"""
         if is_jump:
-            # 添加跳牌历史记录 - 使用最后一张牌的原始牌信息
-            last_play_info = self.playedcards.get_last_play_info()
-            if last_play_info:
-                _, original_card, _ = last_play_info
-                self.add_history(f"{player.mr_card.name} 跳 [{original_card}]")
+            # 跳牌历史记录已经在_execute_jump中处理了，这里不需要重复处理
             
-            # 检查是否打出了skip牌，如果是则消耗skip状态
-            if last_play_info and last_play_info[0].type == "skip":
-                self.skip = False  # 消耗skip状态
+            # 跳牌后直接切换到跳牌玩家的下家
+            self.cur_location = (self.cur_location + self.dir) % self.player_num
+            self.turn_action_taken = False
+            self.clear_state()
+            self.turn_count += 1
+            # 跳牌后检查新玩家的强制摸牌
+            self._check_forced_draw_after_jump()
+            if self.gui:
+                self.gui.show_game_round()
+            # 跳牌后再次检查跳牌
+            self._check_jump_after_jump()
+            return
             
             # 跳牌后直接切换到跳牌玩家的下家
             self.cur_location = (self.cur_location + self.dir) % self.player_num
@@ -884,19 +1115,12 @@ class Game:
         if self.handle_jump_logic():
             return
 
-        # 检查是否打出了reverse牌，如果是则立即切换到下一个玩家
+        # 检查是否打出了reverse牌，如果是则记录方向倒转历史
         last_play_info = self.playedcards.get_last_play_info()
         if last_play_info and last_play_info[0].type == "reverse":
             # 记录方向倒转历史
             self.add_history("方向倒转！")
-            # reverse已经在change_flag()中改变了方向，这里只需要切换到下一个玩家
-            self.cur_location = (self.cur_location + self.dir) % self.player_num
-            self.turn_action_taken = False
-            self.clear_state()
-            self.turn_count += 1
-            if self.gui:
-                self.gui.show_game_round()
-            return
+            # reverse已经在change_flag()中改变了方向，让正常的回合逻辑处理下一个玩家
 
         # 根据玩家类型处理回合结束
         if player.is_ai:
@@ -1003,6 +1227,16 @@ class Game:
 
         # 切换当前玩家到跳牌玩家
         self.cur_location = jumper.position
+
+        # 添加跳牌历史记录
+        jump_card_for_history = virtual_card if virtual_card else original_card
+        self.add_history(f"{jumper.mr_card.name} 跳 [{jump_card_for_history}]")
+
+        # 处理跳牌后的技能效果（在出牌前）
+        if virtual_card:
+            self._handle_jump_skills(jumper, virtual_card)
+        else:
+            self._handle_jump_skills(jumper, original_card)
 
         # 处理跳牌的出牌动作
         # 跳牌后的下一个玩家应该是跳牌玩家的下家
