@@ -33,13 +33,15 @@ class UnoCard:
         return f"{self.color} {self.type} {self.value}"
 
 class MRCard:
-    def __init__(self, name: str, gender: str, team: str, skills: list, image_path: str = None, skill_description: str = ""):
+    def __init__(self, name: str, gender: str, team: str, skills: list, image_path: str = None, skill_description: str = "", tags: str = "", difficulty: int = 5):
         self.name = name          # 武将名
         self.gender = gender      # 性别 'male'/'female'
         self.team = team          # 势力
         self.skills = skills      # 技能列表（Skill对象）
         self.image_path = image_path # 武将图片路径
         self.skill_description = skill_description # 技能描述
+        self.tags = tags          # 标签
+        self.difficulty = difficulty  # 难度 (0-10)
 
     def use_skill(self, skill_name, *args, **kwargs):
         """发动指定技能"""

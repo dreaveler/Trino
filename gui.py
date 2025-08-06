@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QPushButton, QVBoxLayout, QM
                              QSpacerItem, QSizePolicy)
 from PyQt5.QtCore import Qt, QSize, QTimer
 from PyQt5.QtGui import QIcon, QPixmap, QPalette, QBrush
+from player import AIPlayer, HumanPlayer
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -73,16 +74,22 @@ class PlayerInfoWidget(QWidget):
             self.hero_image_size = (150, 210)
             self.faction_image_size = (45, 45)
             self.font_size_name = "20px"
-            self.font_size_hand = "16px"
+            self.font_size_hand = "20px"
         else: # 其他玩家，更紧凑
             self.layout = QVBoxLayout(self)
             self.layout.setContentsMargins(5, 5, 5, 5)
             self.hero_image_size = (100, 140)
             self.faction_image_size = (30, 30)
             self.font_size_name = "16px"
-            self.font_size_hand = "14px"
+            self.font_size_hand = "18px"
             
         self.layout.setSpacing(5)
+        
+        # 存储基准尺寸用于缩放
+        self.base_hero_image_size = self.hero_image_size
+        self.base_faction_image_size = self.faction_image_size
+        self.base_font_size_name = int(self.font_size_name.replace('px', ''))
+        self.base_font_size_hand = int(self.font_size_hand.replace('px', ''))
 
         # --- 武将及势力图片区域 ---
         self.hero_image_container = QWidget()
@@ -109,10 +116,22 @@ class PlayerInfoWidget(QWidget):
         self.name_label = QLabel(f"<b>{player.mr_card.name}({player.position+1})</b>")
         self.hand_count_label = QLabel(f"手牌: {len(player.uno_list)}")
         
+        # 检查是否应该显示UNO标签（标准UNO规则或恃才技能）
+        should_show_uno = player.uno_state  # 标准UNO规则（1张牌）
+        if not should_show_uno and player.mr_card:
+            # 检查恃才技能（2张牌时显示UNO）
+            shicai_skill = next((s for s in player.mr_card.skills if s.__class__.__name__ == 'ShiCai'), None)
+            if shicai_skill and len(player.uno_list) == 2:
+                should_show_uno = True
+        
+        self.uno_state_label = QLabel("UNO!") if should_show_uno else QLabel("")
+        
         self.name_label.setAlignment(Qt.AlignCenter)
         self.hand_count_label.setAlignment(Qt.AlignCenter)
+        self.uno_state_label.setAlignment(Qt.AlignCenter)
         self.name_label.setStyleSheet(f"font-size: {self.font_size_name}; color: white; font-weight: bold; background: transparent;")
         self.hand_count_label.setStyleSheet(f"font-size: {self.font_size_hand}; color: white; background: transparent;")
+        self.uno_state_label.setStyleSheet(f"font-size: {self.font_size_hand}; color: #FFD700; font-weight: bold; background: transparent;")
         
         self.layout.addWidget(self.hero_image_container)
 
@@ -124,11 +143,13 @@ class PlayerInfoWidget(QWidget):
             info_layout.setAlignment(Qt.AlignCenter)
             info_layout.addWidget(self.name_label)
             info_layout.addWidget(self.hand_count_label)
+            info_layout.addWidget(self.uno_state_label)
             info_layout.addStretch()
             self.layout.addWidget(info_widget)
         else: # 其他玩家信息在图片下方
             self.layout.addWidget(self.name_label)
             self.layout.addWidget(self.hand_count_label)
+            self.layout.addWidget(self.uno_state_label)
 
         # 调整组件大小策略，使其紧凑
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -138,7 +159,25 @@ class PlayerInfoWidget(QWidget):
         """更新信息"""
         self.player = player
         self.is_current = is_current
-        self.hand_count_label.setText(f"手牌: {len(player.uno_list)}")
+        try:
+            if hasattr(self, 'hand_count_label') and self.hand_count_label is not None:
+                self.hand_count_label.setText(f"手牌: {len(player.uno_list)}")
+            if hasattr(self, 'uno_state_label') and self.uno_state_label is not None:
+                # 检查是否应该显示UNO标签（标准UNO规则或恃才技能）
+                should_show_uno = player.uno_state  # 标准UNO规则（1张牌）
+                if not should_show_uno and player.mr_card:
+                    # 检查恃才技能（2张牌时显示UNO）
+                    shicai_skill = next((s for s in player.mr_card.skills if s.__class__.__name__ == 'ShiCai'), None)
+                    if shicai_skill and len(player.uno_list) == 2:
+                        should_show_uno = True
+                
+                if should_show_uno:
+                    self.uno_state_label.setText("UNO!")
+                    self.uno_state_label.setStyleSheet(f"font-size: {self.font_size_hand}; color: #FFD700; font-weight: bold; background: transparent;")
+                else:
+                    self.uno_state_label.setText("")
+        except RuntimeError:
+            pass
         self.update_style()
 
     def update_style(self):
@@ -153,6 +192,46 @@ class PlayerInfoWidget(QWidget):
                 border-radius: 10px;
             }}
         """)
+    
+    def update_scaling(self, scale_factor):
+        """更新缩放"""
+        # 更新武将图片尺寸
+        scaled_hero_width = int(self.base_hero_image_size[0] * scale_factor)
+        scaled_hero_height = int(self.base_hero_image_size[1] * scale_factor)
+        self.hero_image_size = (scaled_hero_width, scaled_hero_height)
+        
+        # 更新势力图片尺寸
+        scaled_faction_width = int(self.base_faction_image_size[0] * scale_factor)
+        scaled_faction_height = int(self.base_faction_image_size[1] * scale_factor)
+        self.faction_image_size = (scaled_faction_width, scaled_faction_height)
+        
+        # 更新字体大小
+        scaled_name_font = int(self.base_font_size_name * scale_factor)
+        scaled_hand_font = int(self.base_font_size_hand * scale_factor)
+        self.font_size_name = f"{scaled_name_font}px"
+        self.font_size_hand = f"{scaled_hand_font}px"
+        
+        # 重新设置武将图片
+        if self.player.mr_card and self.player.mr_card.image_path:
+            pixmap = QPixmap(resource_path(os.path.join('images', self.player.mr_card.image_path)))
+            self.hero_image_label.setPixmap(pixmap.scaled(self.hero_image_size[0], self.hero_image_size[1], Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        
+        # 重新设置势力图片
+        faction_path = get_faction_image_path(self.player.team)
+        if faction_path:
+            faction_pixmap = QPixmap(faction_path)
+            self.faction_image_label.setPixmap(faction_pixmap.scaled(self.faction_image_size[0], self.faction_image_size[1], Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        
+        # 更新字体大小
+        self.name_label.setStyleSheet(f"font-size: {self.font_size_name}; color: white; font-weight: bold; background: transparent;")
+        self.hand_count_label.setStyleSheet(f"font-size: {self.font_size_hand}; color: white; background: transparent;")
+        
+        # 更新UNO标签字体大小
+        if hasattr(self, 'uno_state_label') and self.uno_state_label is not None:
+            if self.uno_state_label.text() == "UNO!":
+                self.uno_state_label.setStyleSheet(f"font-size: {self.font_size_hand}; color: #FFD700; font-weight: bold; background: transparent;")
+            else:
+                self.uno_state_label.setStyleSheet(f"font-size: {self.font_size_hand}; color: white; background: transparent;")
 
 class ModeDialog(QDialog):
     def __init__(self, parent=None):
@@ -180,36 +259,253 @@ class SelectHeroDialog(QDialog):
     def __init__(self, mode, parent=None):
         super().__init__(parent)
         from mr_cards import all_heroes
+        import random
         self.main_window = parent
         self.mode = mode
         self.all_heroes = list(all_heroes.keys())
         
-        self.setWindowTitle('选择你的武将')
-        self.setStyleSheet("background-color: white;")
-        self.setMinimumSize(300, 400)
-        layout = QVBoxLayout(self)
+        # 随机选择三个武将供玩家选择
+        self.available_heroes = random.sample(self.all_heroes, min(3, len(self.all_heroes)))
+        print(f"选择的武将: {self.available_heroes}")  # 调试信息
+        self.selected_hero = None
         
-        label = QLabel('请选择你的武将:')
-        self.hero_list = QListWidget()
-        for hero in self.all_heroes:
-            self.hero_list.addItem(hero)
+        self.setWindowTitle('选择你的武将')
+        # 固定窗口大小，不使用弹性区域
+        self.setFixedSize(1600, 1000)
+        
+        # 创建主布局
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # 设置对话框本身的背景图片
+        background_path = resource_path(os.path.join('images', 'choose_mr_background.jpg'))
+        print(f"背景图片路径: {background_path}")
+        print(f"文件是否存在: {os.path.exists(background_path)}")
+        if os.path.exists(background_path):
+            try:
+                # 使用QPalette设置背景图片，确保完全填充窗口
+                pixmap = QPixmap(background_path)
+                if not pixmap.isNull():
+                    # 缩放到窗口大小，保持宽高比但填充整个窗口
+                    scaled_pixmap = pixmap.scaled(
+                        self.size(), 
+                        Qt.KeepAspectRatioByExpanding, 
+                        Qt.SmoothTransformation
+                    )
+                    palette = self.palette()
+                    palette.setBrush(QPalette.Window, QBrush(scaled_pixmap))
+                    self.setPalette(palette)
+                    self.setAutoFillBackground(True)
+                    print("使用QPalette设置背景图片成功")
+                else:
+                    print("背景图片加载失败")
+                    self.setStyleSheet("background-color: white;")
+            except Exception as e:
+                print(f"设置背景图片时出错: {e}")
+                self.setStyleSheet("background-color: white;")
+        else:
+            print("背景图片文件不存在，使用白色背景")
+            self.setStyleSheet("background-color: white;")
+        
+        # 添加弹性空间，将标题向下移动
+        layout.addStretch(1)
+        
+        # 标题
+        title_label = QLabel('请选择你的武将:')
+        title_label.setStyleSheet("font-size: 28px; font-weight: bold; margin: 20px; background: transparent; color: white;")
+        title_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title_label)
+        
+        # 添加弹性空间，将内容推向顶部
+        layout.addStretch(1)
+        
+        # 武将选择区域
+        hero_widget = QWidget()
+        hero_widget.setStyleSheet("background: transparent;")
+        hero_layout = QHBoxLayout(hero_widget)
+        hero_layout.setSpacing(10)
+        hero_layout.setAlignment(Qt.AlignCenter)
+        
+        self.hero_buttons = []
+        for hero_name in self.available_heroes:
+            hero_card = all_heroes[hero_name]
+            
+            # 创建武将卡片容器
+            card_widget = QWidget()
+            card_widget.setFixedSize(400, 750)
+            card_widget.setStyleSheet("""
+                QWidget {
+                    background-color: transparent;
+                    border: none;
+                    border-radius: 10px;
+                    padding: 2px;
+                }
+                QWidget:hover {
+                    background-color: rgba(227, 242, 253, 0.3);
+                }
+                QWidget[selected="true"] {
+                    background-color: rgba(212, 237, 218, 0.5);
+                }
+            """)
+            
+            card_layout = QVBoxLayout(card_widget)
+            card_layout.setSpacing(1)
+            
+            # 武将图片
+            image_path = resource_path(os.path.join('images', hero_card.image_path))
+            print(f"武将 {hero_name} 图片路径: {image_path}")  # 调试信息
+            image_label = QLabel()
+            if os.path.exists(image_path):
+                pixmap = QPixmap(image_path)
+                if not pixmap.isNull():
+                    target_width = 380  # 与技能介绍信息栏宽度一致
+                    target_height = int(target_width * 750 / 530)  # 约538
+                    pixmap = pixmap.scaled(target_width, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    image_label.setPixmap(pixmap)
+                else:
+                    # 如果图片加载失败，显示默认文本
+                    image_label.setText("图片加载失败")
+                    image_label.setStyleSheet("color: #999; font-size: 16px;")
+            else:
+                # 如果图片文件不存在，显示默认文本
+                image_label.setText("图片不存在")
+                image_label.setStyleSheet("color: #999; font-size: 16px;")
+            
+            image_label.setAlignment(Qt.AlignCenter)
+            card_layout.addWidget(image_label)
+            
+            # 武将名称
+            name_label = QLabel(hero_name)
+            name_label.setStyleSheet("font-size: 24px; font-weight: bold; color: black; margin: 0px;")
+            name_label.setAlignment(Qt.AlignCenter)
+            card_layout.addWidget(name_label)
+            
+            # 势力信息
+            team_map = {'shu': '蜀', 'wei': '魏', 'wu': '吴', 'qun': '群'}
+            team_text = team_map.get(hero_card.team, hero_card.team)
+            team_label = QLabel(f"势力: {team_text}")
+            team_label.setStyleSheet("font-size: 18px; color: black; margin: 0px;")
+            team_label.setAlignment(Qt.AlignCenter)
+            card_layout.addWidget(team_label)
+            
+            # 技能描述（完整版）
+            skill_label = QLabel(hero_card.skill_description)
+            skill_label.setStyleSheet("font-size: 18px; color: black; margin: 0px; line-height: 1.0;")
+            skill_label.setAlignment(Qt.AlignLeft)
+            skill_label.setWordWrap(True)
+            card_layout.addWidget(skill_label)
+            
+            # 特点信息
+            if hasattr(hero_card, 'tags') and hero_card.tags:
+                tags_label = QLabel(f"特点: {hero_card.tags}")
+                tags_label.setStyleSheet("font-size: 18px; color: #333; margin: 0px; font-weight: bold;")
+                tags_label.setAlignment(Qt.AlignCenter)
+                card_layout.addWidget(tags_label)
+            
+            # 难度信息
+            if hasattr(hero_card, 'difficulty'):
+                difficulty_label = QLabel(f"难度: {hero_card.difficulty}/10")
+                difficulty_label.setStyleSheet("font-size: 18px; color: #333; margin: 0px; font-weight: bold;")
+                difficulty_label.setAlignment(Qt.AlignCenter)
+                card_layout.addWidget(difficulty_label)
+            
+            # 使卡片可点击
+            card_widget.hero_name = hero_name  # 存储武将名称
+            card_widget.mousePressEvent = self.create_hero_click_handler(card_widget, hero_name)
+            card_widget.setCursor(Qt.PointingHandCursor)
+            
+            self.hero_buttons.append((card_widget, hero_name))
+            hero_layout.addWidget(card_widget)
+        
+        layout.addWidget(hero_widget)
+        
+        # 添加弹性空间，将按钮推向底部
+        layout.addStretch(2)
+        
+        # 按钮区域
+        button_layout = QHBoxLayout()
+        button_layout.setAlignment(Qt.AlignCenter)
         
         start_button = QPushButton('开始游戏')
+        start_button.setFixedSize(240, 80)
+        start_button.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                font-size: 24px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #218838;
+            }
+            QPushButton:disabled {
+                background-color: #6c757d;
+            }
+        """)
         start_button.clicked.connect(self.start_game_action)
+        start_button.setEnabled(False)  # 初始状态禁用，直到选择武将
+        self.start_button = start_button
         
-        layout.addWidget(label)
-        layout.addWidget(self.hero_list)
-        layout.addWidget(start_button)
+        button_layout.addWidget(start_button)
+        layout.addLayout(button_layout)
+        
+        # 添加底部间距
+        layout.addStretch(1)
+
+    def create_hero_click_handler(self, widget, hero_name):
+        """创建武将卡片点击事件处理器"""
+        def handler(event):
+            self.on_hero_clicked(widget, hero_name)
+        return handler
+
+    def on_hero_clicked(self, widget, hero_name):
+        """处理武将卡片点击事件"""
+        # 清除之前的选择
+        for card_widget, _ in self.hero_buttons:
+            card_widget.setProperty("selected", False)
+            card_widget.style().unpolish(card_widget)
+            card_widget.style().polish(card_widget)
+        
+        # 设置当前选择
+        widget.setProperty("selected", True)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+        
+        self.selected_hero = hero_name
+        self.start_button.setEnabled(True)
+
+    def resizeEvent(self, event):
+        """处理窗口大小改变事件，重新设置背景"""
+        super().resizeEvent(event)
+        # 重新设置背景图片以适应新的窗口大小
+        background_path = resource_path(os.path.join('images', 'choose_mr_background.jpg'))
+        if os.path.exists(background_path):
+            try:
+                pixmap = QPixmap(background_path)
+                if not pixmap.isNull():
+                    scaled_pixmap = pixmap.scaled(
+                        self.size(), 
+                        Qt.KeepAspectRatioByExpanding, 
+                        Qt.SmoothTransformation
+                    )
+                    palette = self.palette()
+                    palette.setBrush(QPalette.Window, QBrush(scaled_pixmap))
+                    self.setPalette(palette)
+                    self.setAutoFillBackground(True)
+            except Exception as e:
+                print(f"重新设置背景图片时出错: {e}")
 
     def start_game_action(self):
-        selected_items = self.hero_list.selectedItems()
-        if not selected_items:
+        if not self.selected_hero:
             QMessageBox.warning(self, '提示', '请选择一个武将！')
             return
-        player_hero = selected_items[0].text()
         
-        remaining_heroes = self.all_heroes[:]
-        remaining_heroes.remove(player_hero)
+        player_hero = self.selected_hero
+        
+        # 从所有武将中移除已选择的武将
+        remaining_heroes = [hero for hero in self.all_heroes if hero != player_hero]
         
         # 根据模式确定对手数量，这里暂时写死为2
         num_others = 2 
@@ -217,7 +513,7 @@ class SelectHeroDialog(QDialog):
             # 如果不够，允许重复选择
             other_heros = random.choices(remaining_heroes, k=num_others)
         else:
-            other_heros = random.sample(remaining_heroes, num_others)
+            other_heros = random.sample(remaining_heroes, k=num_others)
             
         self.main_window.start_game(self.mode, player_hero, other_heros)
         self.accept()
@@ -240,9 +536,15 @@ class MainWindow(QWidget):
         self.wusheng_active = False # 武圣技能状态
         # 删除弃牌模式状态相关代码
 
+        # 添加缩放相关属性
+        self.base_width = 1600
+        self.base_height = 900
+        self.scale_factor = 1.0
+        self.scaled_components = []  # 存储需要缩放的组件
+
         # 为所有对话框设置一个更明亮的全局样式
         QApplication.instance().setStyleSheet("""
-            QDialog, QMessageBox, QInputDialog {
+            QMessageBox, QInputDialog {
                 background-color: white; /* 将背景设置为纯白 */
                 color: black;
             }
@@ -274,8 +576,88 @@ class MainWindow(QWidget):
         self._init_background() # 初始化背景
         self.show_main_menu()
 
+    def calculate_scale_factor(self):
+        """计算当前窗口相对于基准尺寸的缩放因子"""
+        current_width = self.width()
+        current_height = self.height()
+        
+        # 计算宽度和高度的缩放比例，取较小值以保持比例
+        width_scale = current_width / self.base_width
+        height_scale = current_height / self.base_height
+        
+        # 限制缩放范围，避免过小或过大
+        scale_factor = min(width_scale, height_scale)
+        scale_factor = max(0.5, min(scale_factor, 2.0))  # 限制在0.5到2.0之间
+        
+        return scale_factor
+
+    def apply_scaling_to_component(self, component, base_size, base_font_size=None):
+        """对单个组件应用缩放"""
+        if component is None:
+            return
+            
+        try:
+            # 缩放尺寸
+            if base_size:
+                scaled_width = int(base_size[0] * self.scale_factor)
+                scaled_height = int(base_size[1] * self.scale_factor)
+                component.setFixedSize(scaled_width, scaled_height)
+            
+            # 缩放字体
+            if base_font_size and hasattr(component, 'setStyleSheet'):
+                scaled_font_size = int(base_font_size * self.scale_factor)
+                current_style = component.styleSheet()
+                # 更新字体大小
+                import re
+                current_style = re.sub(r'font-size:\s*\d+px', f'font-size: {scaled_font_size}px', current_style)
+                component.setStyleSheet(current_style)
+        except RuntimeError:
+            # 组件已被删除，忽略错误
+            pass
+
+    def update_all_scaled_components(self):
+        """更新所有需要缩放的组件"""
+        # 创建临时列表来存储有效的组件，避免在迭代时修改列表
+        valid_components = []
+        for component_info in self.scaled_components:
+            component, base_size, base_font_size = component_info
+            try:
+                # 检查组件是否仍然有效
+                if component is not None and not component.isHidden():
+                    self.apply_scaling_to_component(component, base_size, base_font_size)
+                    valid_components.append(component_info)
+            except RuntimeError:
+                # 组件已被删除，跳过
+                continue
+        
+        # 更新缩放组件列表，只保留有效的组件
+        self.scaled_components = valid_components
+        
+        # 更新PlayerInfoWidget的缩放
+        for player_widget in self.player_widgets.values():
+            if hasattr(player_widget, 'update_scaling'):
+                try:
+                    player_widget.update_scaling(self.scale_factor)
+                except RuntimeError:
+                    # 如果PlayerInfoWidget已被删除，跳过
+                    continue
+
+    def add_scaled_component(self, component, base_size=None, base_font_size=None):
+        """添加需要缩放的组件到列表"""
+        self.scaled_components.append((component, base_size, base_font_size))
+        # 立即应用当前缩放
+        self.apply_scaling_to_component(component, base_size, base_font_size)
+
     def resizeEvent(self, event):
-        """处理窗口大小改变事件，重新设置背景"""
+        """处理窗口大小改变事件，重新设置背景和缩放"""
+        # 计算新的缩放因子
+        new_scale_factor = self.calculate_scale_factor()
+        
+        # 如果缩放因子发生变化，更新所有组件
+        if abs(new_scale_factor - self.scale_factor) > 0.01:  # 避免微小变化
+            self.scale_factor = new_scale_factor
+            self.update_all_scaled_components()
+        
         self._init_background()
         super().resizeEvent(event)
 
@@ -304,7 +686,8 @@ class MainWindow(QWidget):
 
         self.btns = [self.start_btn, self.hero_btn, self.rule_btn, self.exit_btn]
         for btn in self.btns:
-            btn.setFixedSize(200, 50)
+            # 添加按钮到缩放系统
+            self.add_scaled_component(btn, base_size=(200, 50), base_font_size=20)
             btn.setStyleSheet("""
                 QPushButton {
                     font-size: 20px; color: white; background-color: #2980b9; 
@@ -330,6 +713,17 @@ class MainWindow(QWidget):
         if self.game_widget:
             self.game_widget.setParent(None)
             self.game_widget = None
+        
+        # 清理AI状态标签
+        try:
+            if hasattr(self, 'ai_status_label') and self.ai_status_label is not None:
+                self.ai_status_label.setParent(None)
+                self.ai_status_label = None
+        except RuntimeError:
+            pass
+            
+        # 清空缩放组件列表，避免访问已删除的组件
+        self.scaled_components.clear()
 
     def setup_game_ui(self):
         """创建并设置游戏界面的布局，具有中心弃牌堆、牌堆和信息区"""
@@ -361,6 +755,10 @@ class MainWindow(QWidget):
         self.draw_pile_count.setAlignment(Qt.AlignCenter)
         self.draw_pile_count.setStyleSheet("font-size: 18px; color: white; font-weight: bold; background: rgba(0,0,0,0.5); border-radius: 5px;")
         
+        # 添加牌堆组件到缩放系统
+        self.add_scaled_component(self.draw_pile_image, base_size=(100, 150))
+        self.add_scaled_component(self.draw_pile_count, base_font_size=18)
+        
         draw_pile_layout.addWidget(self.draw_pile_image)
         draw_pile_layout.addWidget(self.draw_pile_count)
         self.grid_layout.addWidget(self.draw_pile_widget, 1, 0, alignment=Qt.AlignCenter)
@@ -387,9 +785,12 @@ class MainWindow(QWidget):
         self.info_label.setWordWrap(True)
         info_layout.addWidget(self.info_label)
         
+        # 添加信息标签到缩放系统
+        self.add_scaled_component(self.info_label, base_font_size=18)
+        
         # 历史记录按钮 (放在信息区下面)
         self.history_btn = QPushButton('📜 历史')
-        self.history_btn.setFixedSize(150, 45)
+        self.add_scaled_component(self.history_btn, base_size=(150, 45), base_font_size=16)
         self.history_btn.setStyleSheet("""
             QPushButton { 
                 font-size: 16px; font-weight: bold; color: white; 
@@ -464,6 +865,9 @@ class MainWindow(QWidget):
             border: 1px solid #99c; border-radius: 8px; padding: 8px; min-height: 100px;
         """)
         
+        # 添加技能标签到缩放系统
+        self.add_scaled_component(self.my_skill_label, base_font_size=15)
+        
         right_panel_layout.addWidget(self.action_area)
         right_panel_layout.addWidget(self.my_skill_label)
         right_panel_layout.setStretchFactor(self.action_area, 1)
@@ -499,6 +903,12 @@ class MainWindow(QWidget):
     def start_game(self, mode, player_hero, other_heros):
         from game import Game
         
+        # 清空历史记录
+        self.history_lines = []
+        
+        # 清空缩放组件列表，避免内存泄漏
+        self.scaled_components.clear()
+        
         num_players = len(other_heros) + 1
         self.game = Game(player_num=num_players, mode=mode)
         self.game.set_gui(self)
@@ -517,6 +927,10 @@ class MainWindow(QWidget):
         
         # 4. 显示第一回合
         self.show_game_round(first_round=True)
+        
+        # 5. 更新历史记录按钮文本
+        if hasattr(self, 'history_btn'):
+            self.history_btn.setText('📜 历史 (0)')
 
     def get_cur_player_info(self):
         """获取当前玩家的相关信息"""
@@ -528,75 +942,69 @@ class MainWindow(QWidget):
         return cur_idx, player, hand, draw_n, can_draw_chain
 
     def show_game_round(self, first_round=False):
-        # --- 回合开始前的状态检查 ---
-        # 状态清理和跳过逻辑现在完全由 game.next_player() 处理
-        
-        # 注意：武圣状态不应该在这里重置，因为武圣激活后需要保持状态直到出牌或取消
-        
-        cur_idx, player, hand, draw_n, can_draw_chain = self.get_cur_player_info()
-        human_player = self.game.player_list[0] # 总是获取人类玩家
-        human_hand = human_player.uno_list # 总是获取人类玩家的手牌
-
-        # 更新所有玩家信息栏
-        for pos, widget in self.player_widgets.items():
-            p = self.game.player_list[pos]
-            is_main = (p.position == 0)
-            widget.update_info(p, is_current=(pos == cur_idx))
-            if is_main:
-                widget.is_main_player = True # 确保主玩家的标志正确
-                # 更新主玩家的技能描述
-                skill_desc = p.mr_card.skill_description if p.mr_card else "无技能"
-                self.my_skill_label.setText(f"<b>{p.mr_card.name} - 技能</b><br>{skill_desc}")
-
-        # 渲染通用UI元素
-        self.show_center_card_stack()
-        self.render_info_area()
-        self.update_draw_pile_count()
-        self.selected_card_idx = None
-
-        # 总是渲染人类玩家的手牌，但根据当前回合玩家决定是否可点击
-        is_human_turn = not player.is_ai
-        self.render_hand_area(human_hand, draw_n, can_draw_chain, enable_click=is_human_turn)
-
-        if player.is_ai:
-            # AI回合
-            self.render_action_area(end_enabled=False) # 禁用所有操作按钮
-            if hasattr(self, 'play_btn'): self.play_btn.setEnabled(False)
-            if hasattr(self, 'draw_btn'): self.draw_btn.setEnabled(False)
-            if hasattr(self, 'end_btn'): self.end_btn.setEnabled(False)
+        # 如果游戏已经结束，不更新界面
+        if hasattr(self, 'game') and self.game and self.game.game_over:
+            return
             
-            # 增加一个状态标签，提示是AI的回合
-            if not hasattr(self, 'ai_status_label'):
-                self.ai_status_label = QLabel(f"AI ({player.mr_card.name}) 正在思考...")
-                self.ai_status_label.setStyleSheet("font-size: 20px; color: yellow;")
-                self.grid_layout.addWidget(self.ai_status_label, 1, 0, alignment=Qt.AlignCenter)
-            self.ai_status_label.setText(f"AI ({player.mr_card.name}) 正在思考...")
-            self.ai_status_label.setVisible(True)
+        # 获取当前玩家信息
+        cur_location = self.game.cur_location
+        player = self.game.player_list[cur_location]
+        draw_n = self.game.draw_n
+        
+        # 更新玩家信息显示
+        for position, player_widget in self.player_widgets.items():
+            is_current = (position == cur_location)
+            player_widget.update_info(self.game.player_list[position], is_current)
+        
+        # 更新中央牌堆显示
+        self.show_center_card_stack()
+        
+        # 更新摸牌堆数量
+        self.update_draw_pile_count()
+        
+        # 更新历史记录
+        self.render_info_area()
+        
+        # 根据当前玩家类型处理
+        if isinstance(player, AIPlayer):
+            # AI玩家回合
+            try:
+                if hasattr(self, 'ai_status_label') and self.ai_status_label is not None:
+                    self.ai_status_label.setVisible(True)
+                    self.ai_status_label.setText(f"AI ({player.mr_card.name}) 正在思考...")
+            except RuntimeError:
+                pass  # 如果标签已被删除，静默忽略
 
             # 延迟后执行AI操作
-            QTimer.singleShot(2000, self.game.execute_ai_turn)
+            def execute_ai_turn_safe():
+                try:
+                    if hasattr(self, 'game') and self.game is not None and not self.game.game_over:
+                        self.game.execute_turn()
+                except RuntimeError:
+                    pass  # 如果GUI已被删除，静默忽略
+            QTimer.singleShot(2000, execute_ai_turn_safe)
         else:
-            # 玩家回合
-            if hasattr(self, 'ai_status_label'):
-                self.ai_status_label.setVisible(False)
+            # 人类玩家回合
+            try:
+                if hasattr(self, 'ai_status_label') and self.ai_status_label is not None:
+                    self.ai_status_label.setVisible(False)
+            except RuntimeError:
+                pass  # 如果标签已被删除，静默忽略
 
             # 回合开始时，检查手牌是否超限
             if len(player.uno_list) > player.hand_limit:
                 # 手牌超限时，显示提示信息
                 self.show_temporary_message(f"{player.mr_card.name} 手牌已达上限，不能再摸牌！", duration=3000)
-
-            # 新增：检查玩家是否能出牌
-            can_play = player.can_play_any_card()
             
-            # 检查是否有加牌串待处理
+            # 渲染手牌区域
+            can_draw_chain = self.game.can_continue_draw_chain(player)
+            self.render_hand_area(player.uno_list, draw_n, can_draw_chain, enable_click=True)
+            
+            # 渲染操作按钮区域
             is_forced_draw_pending = draw_n > 0
-            
-            # 如果有加牌串，禁用出牌和技能按钮，只允许摸牌
-            if is_forced_draw_pending:
-                can_play = False
-            
-            # 由于现在出牌/摸牌/发动技能后会自动结束回合，结束回合按钮始终禁用
-            self.render_action_area(is_forced_draw_pending=is_forced_draw_pending, can_play=can_play, end_enabled=False)
+            can_play = len(player.uno_list) > 0  # 有手牌就可以出牌
+            end_enabled = self.game.turn_action_taken  # 已经执行过行动就可以结束回合
+            self.render_action_area(is_forced_draw_pending, can_play, end_enabled)
 
     def render_hand_area(self, hand, draw_n, can_draw_chain, enable_click=True):
         """渲染手牌区域"""
@@ -650,6 +1058,7 @@ class MainWindow(QWidget):
         
         # 出牌按钮
         self.play_btn = QPushButton('出牌')
+        self.add_scaled_component(self.play_btn, base_font_size=16)
         btn_style = """
             QPushButton { font-size: 16px; font-weight: bold; color: white; background-color: #e74c3c; 
                           border: 2px solid #c0392b; border-radius: 8px; padding: 8px 12px; min-height: 35px; }
@@ -664,6 +1073,7 @@ class MainWindow(QWidget):
         # 摸牌按钮
         draw_btn_text = '强制摸牌' if is_forced_draw_pending else '摸牌'
         self.draw_btn = QPushButton(draw_btn_text)
+        self.add_scaled_component(self.draw_btn, base_font_size=16)
         btn_style = """
             QPushButton { font-size: 16px; font-weight: bold; color: white; background-color: #3498db; 
                           border: 2px solid #2980b9; border-radius: 8px; padding: 8px 12px; min-height: 35px; }
@@ -675,11 +1085,31 @@ class MainWindow(QWidget):
         self.draw_btn.setEnabled(not self.game.turn_action_taken)
         self.action_area_layout.addWidget(self.draw_btn)
 
-        # 技能按钮 - 在需要强制摸牌时禁用
+        # 技能按钮 - 检查技能是否可用
         if active_skills:
+            # 检查技能是否可用
+            skill_available = True
+            skill_unavailable_reason = ""
+            
+            for skill in active_skills:
+                if skill.name == '缔盟':
+                    # 鲁肃缔盟技能：手牌数大于6时失效
+                    if len(cur_player.uno_list) > 6:
+                        skill_available = False
+                        skill_unavailable_reason = "手牌数大于6，技能失效"
+                        break
+                elif skill.name == '武圣':
+                    # 关羽武圣技能：需要红色牌
+                    red_cards = [card for card in cur_player.uno_list if card.color == 'red']
+                    if not red_cards:
+                        skill_available = False
+                        skill_unavailable_reason = "没有红色牌，无法发动武圣"
+                        break
+            
             # 根据武圣状态设置按钮文本
             skill_btn_text = '取消武圣' if self.wusheng_active else '技能'
             self.skill_btn = QPushButton(skill_btn_text)
+            self.add_scaled_component(self.skill_btn, base_font_size=16)
             btn_style = """
                 QPushButton { font-size: 16px; font-weight: bold; color: white; background-color: #9b59b6; 
                               border: 2px solid #8e44ad; border-radius: 8px; padding: 8px 12px; min-height: 35px; }
@@ -688,12 +1118,25 @@ class MainWindow(QWidget):
             """
             self.skill_btn.setStyleSheet(btn_style)
             self.skill_btn.clicked.connect(self.on_skill_button_clicked)
-            # 在需要强制摸牌时禁用技能按钮
-            self.skill_btn.setEnabled(not self.game.turn_action_taken and not is_forced_draw_pending)
+            
+            # 设置按钮状态
+            button_enabled = (not self.game.turn_action_taken and 
+                            not is_forced_draw_pending and 
+                            (skill_available or self.wusheng_active))  # 武圣激活时允许取消
+            
+            self.skill_btn.setEnabled(button_enabled)
+            
+            # 如果技能不可用，设置工具提示
+            if not skill_available and not self.wusheng_active:
+                self.skill_btn.setToolTip(skill_unavailable_reason)
+            else:
+                self.skill_btn.setToolTip("")
+                
             self.action_area_layout.addWidget(self.skill_btn)
 
         # 结束回合按钮
         self.end_btn = QPushButton('结束回合')
+        self.add_scaled_component(self.end_btn, base_font_size=16)
         btn_style = """
             QPushButton { font-size: 16px; font-weight: bold; color: white; background-color: #f39c12; 
                           border: 2px solid #e67e22; border-radius: 8px; padding: 8px 12px; min-height: 35px; }
@@ -751,8 +1194,11 @@ class MainWindow(QWidget):
 
     def on_skill_button_clicked(self):
         """处理技能按钮的点击事件"""
+        print(f"DEBUG on_skill_button_clicked: wusheng_active = {self.wusheng_active}")
+        
         # 检查是否武圣已激活，如果是则取消武圣状态
         if self.wusheng_active:
+            print("DEBUG: Cancelling WuSheng")
             self.wusheng_active = False
             self.show_temporary_message("武圣技能已取消", 1500)
             # 立即更新技能按钮文本
@@ -769,40 +1215,38 @@ class MainWindow(QWidget):
                 if skill.is_active_in_turn:
                     active_skills.append(skill)
         
+        print(f"DEBUG: Found {len(active_skills)} active skills")
+        
         if len(active_skills) == 1:
             # 如果只有一个主动技能，直接发动
             skill = active_skills[0]
+            print(f"DEBUG: Activating single skill: {skill.name}")
             self.direct_activate_skill(skill)
             
             # 武圣技能不会自动结束回合，需要玩家选择牌
             if skill.name != '武圣':
-                # 执行技能后，禁用所有行动按钮
-                self.disable_action_buttons()
-                # 自动结束回合
-                self.game.next_player()
-                self.show_game_round()
+                # 执行技能后，技能内部会处理回合结束
+                pass
         elif len(active_skills) > 1:
             # 如果有多个主动技能，弹出选择对话框
             skill_names = [skill.name for skill in active_skills]
             skill_name, ok = QInputDialog.getItem(self, "选择技能", "请选择要发动的技能:", skill_names, 0, False)
             if ok and skill_name:
                 selected_skill = next(skill for skill in active_skills if skill.name == skill_name)
+                print(f"DEBUG: Activating selected skill: {selected_skill.name}")
                 self.direct_activate_skill(selected_skill)
                 
                 # 武圣技能不会自动结束回合，需要玩家选择牌
                 if selected_skill.name != '武圣':
-                    # 执行技能后，禁用所有行动按钮
-                    self.disable_action_buttons()
-                    # 自动结束回合
-                    self.game.next_player()
-                    self.show_game_round()
+                    # 执行技能后，技能内部会处理回合结束
+                    pass
 
     def direct_activate_skill(self, skill):
         """直接激活技能的最终执行逻辑"""
         player = self.game.player_list[self.game.cur_location]
         
         if skill.name == '反间':
-            self.game.handle_skill_fanjian(player)
+            player.activate_skill('反间')
             # 反间技能有自己的UI流程和刷新，这里不需要再调用show_game_round
         elif skill.name == '武圣':
             self.activate_wusheng_skill()
@@ -815,6 +1259,7 @@ class MainWindow(QWidget):
 
     def activate_wusheng_skill(self):
         """激活武圣技能"""
+        print("DEBUG: activate_wusheng_skill called")
         player = self.game.player_list[self.game.cur_location]
         
         # 检查玩家是否有红色牌
@@ -826,6 +1271,7 @@ class MainWindow(QWidget):
         
         # 设置武圣状态为激活
         self.wusheng_active = True
+        print(f"DEBUG: Set wusheng_active = {self.wusheng_active}")
         
         # 显示提示信息
         self.show_temporary_message("武圣技能已激活！请选择一张红色牌，它将作为红+2打出。再次点击技能按钮可取消。", 3000)
@@ -1078,7 +1524,7 @@ class MainWindow(QWidget):
 
     def show_temporary_message(self, message, duration=1500):
         """在屏幕中央显示一个临时的、带样式的消息"""
-        if not self.game_widget:
+        if not self.game_widget or (hasattr(self, 'game') and self.game.game_over):
             return
             
         temp_label = QLabel(message, self.game_widget)
@@ -1116,6 +1562,15 @@ class MainWindow(QWidget):
         self.show_message_box('游戏结束', f'玩家 {winner.position + 1} ({winner.mr_card.name}) 获胜！')
         self.show_main_menu()
 
+    def show_draw_and_exit(self, winners):
+        """显示游戏结束时的平局并退出游戏"""
+        if len(winners) == 2:
+            winner_names = f'玩家 {winners[0].position + 1} ({winners[0].mr_card.name}) 和 玩家 {winners[1].position + 1} ({winners[1].mr_card.name})'
+        else:
+            winner_names = ', '.join([f'玩家 {w.position + 1} ({w.mr_card.name})' for w in winners])
+        self.show_message_box('游戏结束', f'{winner_names} 平局！')
+        self.show_main_menu()
+
     def choose_color_dialog(self):
         """让玩家选择颜色的对话框"""
         colors = ['red', 'blue', 'green', 'yellow']
@@ -1125,11 +1580,12 @@ class MainWindow(QWidget):
         return None
     
     def on_play_card_clicked(self):
+        """处理出牌按钮的点击"""
         if self.selected_card_idx is None:
             self.show_message_box('提示', '请先选择一张牌！')
             return
 
-        player = self.game.player_list[0]
+        player = self.game.player_list[0] # 假设人类玩家总是0号
         card = player.uno_list[self.selected_card_idx]
         
         # 检查武圣状态下的出牌
@@ -1140,15 +1596,28 @@ class MainWindow(QWidget):
             self.wusheng_active = False
         else:
             # 正常出牌
-            self.game.handle_player_play(player, self.selected_card_idx, self.wusheng_active)
+            player.play(self.selected_card_idx, self.wusheng_active)
         
         # 执行出牌后，禁用所有行动按钮
         self.disable_action_buttons()
-        # 自动结束回合
-        self.game.next_player()
-        self.show_game_round()
+        # 处理回合结束后的逻辑
+        # 非跳牌的正常出牌逻辑
+        player.game.turn_action_taken = True  # 标记回合已结束
+        player.game.clear_state()
+        player.game.turn_count += 1
+        
+        # 检查是否有玩家可以跳牌
+        if player.handle_jump_logic():
+            return
+        
+        # 没有跳牌，正常切换到下一个玩家
+        # 切换玩家逻辑由游戏主循环处理，这里只需要刷新UI
+        if player.game.gui:
+            player.game.gui.show_game_round()
+        # GUI更新将通过Observer模式自动处理
 
     def on_draw_card_clicked(self):
+        """处理摸牌按钮的点击"""
         player = self.game.player_list[0] # 假设人类玩家总是0号
         
         # 显示摸牌提示
@@ -1158,20 +1627,49 @@ class MainWindow(QWidget):
             self.show_temporary_message(f"{player.mr_card.name} 摸了 1 张牌", duration=2000)
         
         # 调用game.py中的核心逻辑
-        self.game.handle_player_draw(player)
+        player.draw_cards(1)
         # 执行摸牌后，禁用所有行动按钮
         self.disable_action_buttons()
-        # 自动结束回合
-        self.game.next_player()
-        self.show_game_round()
+        # 处理回合结束后的逻辑
+        # 非跳牌的正常出牌逻辑
+        player.game.turn_action_taken = True  # 标记回合已结束
+        player.game.clear_state()
+        player.game.turn_count += 1
+        
+        # 检查是否有玩家可以跳牌
+        if player.handle_jump_logic():
+            return
+        
+        # 没有跳牌，正常切换到下一个玩家
+        # 切换玩家逻辑由游戏主循环处理，这里只需要刷新UI
+        if player.game.gui:
+            player.game.gui.show_game_round()
+        # GUI更新将通过Observer模式自动处理
 
     def on_end_turn_clicked(self):
         """处理结束回合按钮的点击"""
-        self.game.next_player()
-        self.show_game_round()
+        player = self.game.player_list[0] # 假设人类玩家总是0号
+        
+        # 结束回合
+        player.game.turn_action_taken = True
+        # 处理回合结束后的逻辑
+        # 非跳牌的正常出牌逻辑
+        player.game.turn_action_taken = True  # 标记回合已结束
+        player.game.clear_state()
+        player.game.turn_count += 1
+        
+        # 检查是否有玩家可以跳牌
+        if player.handle_jump_logic():
+            return
+        
+        # 没有跳牌，正常切换到下一个玩家
+        # 切换玩家逻辑由游戏主循环处理，这里只需要刷新UI
+        if player.game.gui:
+            player.game.gui.show_game_round()
+        # GUI更新将通过Observer模式自动处理
 
     def ask_yes_no_question(self, title, question):
-        """弹出一个通用的“是/否”对话框"""
+        """弹出一个通用的"是/否"对话框"""
         reply = QMessageBox.question(self, title, question, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         return reply == QMessageBox.Yes
 
@@ -1216,7 +1714,7 @@ class MainWindow(QWidget):
         
         cur_player_idx = self.game.cur_location
         player = self.game.player_list[cur_player_idx]
-        if player.is_ai:
+        if isinstance(player, AIPlayer):
             return # 不处理AI玩家的点击
 
         card = player.uno_list[idx]
@@ -1295,6 +1793,18 @@ class MainWindow(QWidget):
             
             info_layout.addWidget(name_label)
             info_layout.addWidget(skill_label)
+            
+            # 特点信息
+            if hasattr(hero_card, 'tags') and hero_card.tags:
+                tags_label = QLabel(f"特点: {hero_card.tags}")
+                tags_label.setStyleSheet("font-size: 16px; color: #333; font-weight: bold;")
+                info_layout.addWidget(tags_label)
+            
+            # 难度信息
+            if hasattr(hero_card, 'difficulty'):
+                difficulty_label = QLabel(f"难度: {hero_card.difficulty}/10")
+                difficulty_label.setStyleSheet("font-size: 16px; color: #333; font-weight: bold;")
+                info_layout.addWidget(difficulty_label)
             info_layout.addStretch() # 将内容推到顶部
 
             hero_layout.addWidget(info_widget, stretch=1)
@@ -1308,16 +1818,26 @@ class MainWindow(QWidget):
 
     def show_rule_dialog(self):
         rule_text = (
-            "1. 你的回合内，若被强制加牌或选择摸牌，则不可以发动技能或出牌；\n"
-            "2. 仅剩余1张牌时，须喊“UNO”，否则若被抓需要摸1张牌；\n"
-            "3. 仅剩余1张牌时回合内的主动技能失效；\n"
-            "4. 黑色牌不能当作最后一张牌打出，否则需再摸1张牌；\n"
-            "5. [+2]可以叠[+2]，[+2]可以叠[+4]，[+4]可以叠[+4]，[+4]不可以叠[+2]；\n"
-            "6. 手牌数上限通常为20张，达到上限后剩余加牌不再生效；\n"
-            "7. 跳牌：颜色和牌面完全相同时可以跳过其余玩家回合抢先打出该牌；黑色牌不能跳牌；\n"
-            "8. 跳牌时功能牌只生效后1张，且跳牌优先级大于[禁止]，即：加牌串被跳牌后只生效最后1张[+2]；由1号玩家打出[禁止]后若2号玩家有相同颜色的[禁止]可进行跳牌，然后跳过3号玩家的回合；\n"
-            "9. 通过技能发动的跳牌优先级低于未发动技能的跳牌；相同优先级的跳牌按照游戏内出牌顺序执行；\n"
-            "10. 拼点：[禁止]/[转向]/[+2]点数视为0，[黑色]点数视为10；拼点结束后，点数小的人获得双方的拼点牌，若点数相同则各自收回；“UNO”的人不能被拼点。"
+            "=== 基础规则 ===\n"
+            "1. 出牌规则：必须出与当前颜色相同的牌，或使用万能牌改变颜色；\n"
+            "2. 特殊牌效果：\n"
+            "   • [+2]：下家摸2张牌\n"
+            "   • [+4]：下家摸4张牌\n"
+            "   • [跳过]：跳过下家回合\n"
+            "   • [转向]：改变游戏方向\n"
+            "   • [万能牌]：改变颜色\n"
+            "3. 胜利条件：手牌数为0时获胜\n\n"
+            "=== 进阶规则 ===\n"
+            "4. UNO规则：仅剩余1张牌时，须喊\"UNO\"，否则若被抓需要摸1张牌；\n"
+            "5. 手牌上限：通常为20张，达到上限后剩余加牌不再生效；\n"
+            "6. 跳牌规则：颜色和牌面完全相同时可以跳过其余玩家回合抢先打出该牌；黑色牌不能跳牌；\n"
+            "7. 跳牌优先级：通过技能发动的跳牌优先级低于未发动技能的跳牌；相同优先级的跳牌按照游戏内出牌顺序执行；\n"
+            "8. 加牌叠加：[+2]可以叠[+2]，[+2]可以叠[+4]，[+4]可以叠[+4]，[+4]不可以叠[+2]；\n"
+            "9. 技能限制：仅剩余1张牌时回合内的主动技能失效；\n"
+            "10. 黑色牌限制：黑色牌不能当作最后一张牌打出，否则需再摸1张牌；\n\n"
+            "=== 武将技能 ===\n"
+            "游戏包含三国杀风格的武将技能系统，每个武将都有独特的技能效果。\n"
+            "技能会在适当的时机自动触发或由玩家主动发动。"
         )
         rule_dialog = QDialog(self)
         rule_dialog.setWindowTitle('游戏规则')
@@ -1346,6 +1866,123 @@ class MainWindow(QWidget):
         safe_disable_button('draw_btn')
         safe_disable_button('skill_btn')
         safe_disable_button('end_btn')
+
+    def on_turn_start(self, player):
+        """
+        回合开始时的观察者方法
+        """
+        # 更新界面显示
+        self.show_game_round()
+        
+    def on_turn_end(self, player):
+        """
+        回合结束时的观察者方法
+        """
+        # 可以在这里添加回合结束时的界面更新
+        pass
+
+    def on_card_played(self, player, card):
+        """
+        有玩家出牌时的观察者方法
+        """
+        # 更新中央牌堆显示
+        self.show_center_card_stack()
+        # 更新历史记录
+        self.render_info_area()
+        # 更新玩家手牌数量显示
+        self.update_player_hand_display(player)
+        
+        # 如果是人类玩家出牌，需要重新渲染手牌和操作区域
+        if isinstance(player, HumanPlayer):
+            cur_location = self.game.cur_location
+            current_player = self.game.player_list[cur_location]
+            if isinstance(current_player, HumanPlayer):
+                # 重新渲染手牌区域
+                can_draw_chain = self.game.can_continue_draw_chain(current_player)
+                self.render_hand_area(current_player.uno_list, self.game.draw_n, can_draw_chain, enable_click=True)
+                
+                # 重新渲染操作按钮区域
+                is_forced_draw_pending = self.game.draw_n > 0
+                can_play = len(current_player.uno_list) > 0
+                end_enabled = self.game.turn_action_taken
+                self.render_action_area(is_forced_draw_pending, can_play, end_enabled)
+        
+    def on_cards_drawn(self, player, num_cards):
+        """
+        有玩家摸牌时的观察者方法
+        """
+        # 更新玩家手牌数量显示
+        self.update_player_hand_display(player)
+        # 更新摸牌堆数量
+        self.update_draw_pile_count()
+        
+        # 如果是人类玩家摸牌，需要重新渲染手牌和操作区域
+        if isinstance(player, HumanPlayer):
+            cur_location = self.game.cur_location
+            current_player = self.game.player_list[cur_location]
+            if isinstance(current_player, HumanPlayer):
+                # 重新渲染手牌区域
+                can_draw_chain = self.game.can_continue_draw_chain(current_player)
+                self.render_hand_area(current_player.uno_list, self.game.draw_n, can_draw_chain, enable_click=True)
+                
+                # 重新渲染操作按钮区域
+                is_forced_draw_pending = self.game.draw_n > 0
+                can_play = len(current_player.uno_list) > 0
+                end_enabled = self.game.turn_action_taken
+                self.render_action_area(is_forced_draw_pending, can_play, end_enabled)
+        
+    def on_player_hand_changed(self, player):
+        """
+        玩家手牌数量变化时的观察者方法
+        """
+        # 更新玩家信息显示
+        if player.position in self.player_widgets:
+            player_widget = self.player_widgets[player.position]
+            player_widget.update_info(player, is_current=(player.position == self.game.cur_location))
+                
+        # 如果是人类玩家手牌变化，需要重新渲染手牌和操作区域
+        if isinstance(player, HumanPlayer):
+            cur_location = self.game.cur_location
+            current_player = self.game.player_list[cur_location]
+            if isinstance(current_player, HumanPlayer):
+                # 重新渲染手牌区域
+                can_draw_chain = self.game.can_continue_draw_chain(current_player)
+                self.render_hand_area(current_player.uno_list, self.game.draw_n, can_draw_chain, enable_click=True)
+                
+                # 重新渲染操作按钮区域
+                is_forced_draw_pending = self.game.draw_n > 0
+                can_play = len(current_player.uno_list) > 0
+                end_enabled = self.game.turn_action_taken
+                self.render_action_area(is_forced_draw_pending, can_play, end_enabled)
+                
+    def on_draw_pile_changed(self):
+        """
+        摸牌堆数量变化时的观察者方法
+        """
+        # 更新摸牌堆数量显示
+        self.update_draw_pile_count()
+        
+    def on_history_updated(self, message):
+        """
+        历史记录更新时的观察者方法
+        """
+        # 更新历史记录显示
+        self.render_info_area()
+        
+    def on_game_state_changed(self):
+        """
+        游戏状态变化时的观察者方法（通用）
+        """
+        # 更新整个界面
+        self.show_game_round()
+        
+    def update_player_hand_display(self, player):
+        """
+        更新指定玩家的手牌数量显示
+        """
+        if player.position < len(self.player_widgets):
+            player_widget = self.player_widgets[player.position]
+            player_widget.update_info(player, is_current=(player.position == self.game.cur_location))
 
 # 在文件开头添加历史记录对话框类
 class HistoryDialog(QDialog):

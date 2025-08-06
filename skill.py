@@ -17,7 +17,7 @@ class WuSheng(Skill):
 
 class JianXiong(Skill):
     def __init__(self):
-        super().__init__('奸雄', '【奸雄】若场上打出的[+2]/[+4]牌对你生效且不由你打出，你可以获得之。', 'passive')
+        super().__init__('奸雄', '若场上打出的[+2]/[+4]牌对你生效且不由你打出，你可以获得之。', 'passive')
     def on_effect(self, card:UnoCard, from_player:Player, to_player:Player):
         """
         返回详细历史文本
@@ -83,7 +83,7 @@ class QiXi(Skill):
 
 class FanJian(Skill):
     def __init__(self):
-        super().__init__('反间','反间：出牌阶段，你可以摸一张牌，然后将一张手牌（非黑色）交给一名其他角色，该角色需弃置所有与此牌颜色相同的手牌。','active', is_active_in_turn=True)
+        super().__init__('反间','出牌阶段，你可以摸一张牌，然后将一张手牌（非黑色）交给一名其他角色，该角色需弃置所有与此牌相同颜色的手牌。如果弃掉的手牌数量>2，周瑜额外摸一张牌。','active', is_active_in_turn=True)
     def record_history(self, player, target, card_given, cards_discarded):
         discard_str = '、'.join(str(c) for c in cards_discarded) if cards_discarded else '无'
         return f"{player.mr_card.name} 发动[反间]，{target.mr_card.name} 弃掉了 [{discard_str}]"
@@ -105,23 +105,25 @@ class XuanFeng(Skill):
         super().__init__('旋风', '当你跳牌时，可以弃置所有与该牌点数相同的牌。', 'active')
     def __call__(self, jump_card: UnoCard, player: Player):
         """旋风技能：跳牌时弃置所有相同点数的牌"""
-        if jump_card.type == 'number':
-            # 找到所有与跳牌value相同的牌
-            same_value_cards = [card for card in player.uno_list if card.type == 'number' and card.value == jump_card.value]
-            if same_value_cards:
-                # 让玩家选择是否发动技能
-                if player.choose_to_use_skill(self.name):
+        # 检查跳牌是否有value属性（适用于number和draw2等有数值的牌）
+        if hasattr(jump_card, 'value'):
+            # 找到所有与跳牌value相同的牌（不包括跳牌本身）
+            same_value_cards = [card for card in player.uno_list if hasattr(card, 'value') and card.value == jump_card.value]
+            # 让玩家选择是否发动技能
+            if player.choose_to_use_skill(self.name):
+                if same_value_cards:
                     # 弃置所有相同value的牌
                     cards_to_discard = []
-                    for card in same_value_cards:
-                        idx = player.uno_list.index(card)
-                        cards_to_discard.append(idx)
+                    for i, card in enumerate(player.uno_list):
+                        if hasattr(card, 'value') and card.value == jump_card.value:
+                            cards_to_discard.append(i)
                     
                     # 按索引从大到小排序，避免删除时索引变化
                     for idx in sorted(cards_to_discard, reverse=True):
                         player.fold_card(idx)
-                    
-                    return f"{player.mr_card.name} 发动[旋风]，弃置了 {len(same_value_cards)} 张相同点数的牌"
+                
+                # 无论是否弃置了牌，都返回历史记录（跳牌本身不计入弃置牌数）
+                return f"{player.mr_card.name} 发动[旋风]，弃置了 {len(same_value_cards)-1} 张相同点数的牌"
         return None
 
 class SanYao(Skill):
@@ -129,10 +131,22 @@ class SanYao(Skill):
         super().__init__('散谣', '当你跳牌时，你可以指定一名玩家摸2张牌。', 'active')
     def __call__(self, jump_card: UnoCard, player: Player, target_player: Player):
         """散谣技能：跳牌时指定一名玩家摸2张牌"""
+        # 先询问是否发动技能
         if player.choose_to_use_skill(self.name):
-            # 让目标玩家摸2张牌
-            target_player.draw_cards(2, is_skill_draw=True)
-            return f"{player.mr_card.name} 发动[散谣]，令 {target_player.mr_card.name} 摸了2张牌"
+            # 如果选择发动，再选择目标
+            if target_player:
+                # AI玩家，使用预选的目标
+                target = target_player
+            elif player.game and player.game.gui:
+                # 人类玩家，通过GUI选择目标
+                target = player.game.gui.choose_target_player_dialog(exclude_self=True)
+            else:
+                return None
+                
+            if target:
+                # 让目标玩家摸2张牌
+                target.draw_cards(2, is_skill_draw=True)
+                return f"{player.mr_card.name} 发动[散谣]，令 {target.mr_card.name} 摸了2张牌"
         return None
 
 class ShiCai(Skill):
