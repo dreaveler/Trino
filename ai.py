@@ -74,7 +74,6 @@ class AI:
                 for t in ['wild_draw4', 'draw2', 'skip', 'reverse']:
                     for i, c in action_cards:
                         if c.type == t:
-                            # print(f"AI strategy: Stopping player {player_to_stop.position+1} with {c.type}")
                             return 'play', i
 
         # 2. If must respond to a draw chain, play +4 or +2

@@ -51,7 +51,7 @@ class HuJia(Skill):
                     # 该玩家打出此牌，并从手牌中移除
                     helper.play_card_object(card_to_play)
                     # 然后摸一张牌
-                    helper.get_card(1)
+                    helper.draw_cards(1)
                     print(f"【{lord.name}】发动【护驾】，【{helper.name}】替其打出【{card_to_play.content}】并摸一张牌")
                     return card_to_play
         return None

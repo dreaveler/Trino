@@ -13,7 +13,7 @@ class LeBuSiShu(Judge):
         super().__init__()
     def __call__(self, player:Player, card:UnoCard):
         if card.color!='red':
-            player.get_card(1)
+            player.draw_cards(1)
 
 class BingLiangCunDuan(Judge):#兵粮的need_judging可能为false
     def __init__(self):
@@ -43,7 +43,7 @@ class Lightening(Judge):
         super().__init__()
     def __call__(self, player:Player, card:UnoCard):
         if card.color=='wild' or card.color=='wild_draw4':
-            player.get_card(10)
+            player.draw_cards(10)
         else:
             self.transfer=True
 
@@ -78,7 +78,7 @@ class Duel:
                 break
         # 输家摸牌数=双方打出牌总数，若小于3则摸3张
         draw_num = max(duel_count, 3)
-        lose_player.get_card(draw_num)
+        lose_player.draw_cards(draw_num)
         return lose_player, draw_num
 
     def _find_color_card(self, player):
@@ -102,7 +102,7 @@ class NanManRuQin:
                 # 弃置该牌（不加入弃牌堆）
                 player.fold_card([idx])
             else:
-                player.get_card(4)
+                player.draw_cards(4)
 
     def _find_attack_card(self, player):
         """查找玩家手牌中[+2]或[+4]牌，返回索引或None"""
